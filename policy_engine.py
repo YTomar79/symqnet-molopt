@@ -44,7 +44,7 @@ class PolicyEngine:
         
         # Model parameters from YOUR training (EXACTLY as in your code)
         n_qubits = 10
-        L = 64
+        L = 64  # Base latent dimension
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo  # actions
@@ -54,11 +54,11 @@ class PolicyEngine:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(self.device)
         edge_attr = torch.ones(len(edges), 1, dtype=torch.float32, device=self.device) * 0.1
         
-        # 🔥 Use YOUR exact FixedSymQNetWithEstimator (with L=82 from your training)
+        # 🔥 Use YOUR exact FixedSymQNetWithEstimator
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=82,  # This is L + meta_dim from your training (64 + 18)
+            L=L,  # ✅ FIXED: Use base dimension (64), not total (82)
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -76,6 +76,7 @@ class PolicyEngine:
         self.symqnet.eval()
         
         logger.info("Models loaded successfully with exact architectures")
+
     
     def reset(self):
         """Reset policy state for new rollout."""

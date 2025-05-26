@@ -509,6 +509,58 @@ class TestModelConstraints:
             # Should be rejected or clamped
             assert n_qubits > 10  # Would need handling
 
+class TestQubitValidation:
+    """Test strict 10-qubit validation"""
+    
+    def test_rejects_non_10_qubit_systems(self):
+        """Test that non-10-qubit systems are rejected"""
+        
+        invalid_qubits = [4, 6, 8, 12, 15, 20]
+        
+        for n_qubits in invalid_qubits:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                invalid_data = {
+                    "format": "openfermion",
+                    "molecule": "test",
+                    "n_qubits": n_qubits,
+                    "pauli_terms": [
+                        {"coefficient": -1.0, "pauli_string": "I" * n_qubits}
+                    ]
+                }
+                json.dump(invalid_data, f)
+                temp_path = f.name
+            
+            try:
+                parser = HamiltonianParser()
+                with pytest.raises(ValueError, match="only trained for 10 qubits"):
+                    parser.load_hamiltonian(Path(temp_path))
+            finally:
+                os.unlink(temp_path)
+    
+    def test_accepts_exactly_10_qubits(self):
+        """Test that exactly 10-qubit systems are accepted"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            valid_data = {
+                "format": "openfermion",
+                "molecule": "test",
+                "n_qubits": 10,
+                "pauli_terms": [
+                    {"coefficient": -1.0, "pauli_string": "I" * 10},
+                    {"coefficient": 0.5, "pauli_string": "Z" + "I" * 9}
+                ]
+            }
+            json.dump(valid_data, f)
+            temp_path = f.name
+        
+        try:
+            parser = HamiltonianParser()
+            parsed = parser.load_hamiltonian(Path(temp_path))
+            assert parsed['n_qubits'] == 10  # Should succeed
+        finally:
+            os.unlink(temp_path)
+
+
 
 # Test configuration for pytest
 if __name__ == "__main__":

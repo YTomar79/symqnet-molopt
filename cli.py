@@ -23,7 +23,7 @@ from hamiltonian_parser import HamiltonianParser
 from measurement_simulator import MeasurementSimulator
 from policy_engine import PolicyEngine
 from bootstrap_estimator import BootstrapEstimator
-from utils import setup_logging, validate_inputs, save_results
+from utils import setup_logging, validate_inputs, save_results, suggest_qubit_mapping
 
 # 🔥 IMPORT YOUR EXACT ARCHITECTURES 🔥
 from architectures import (
@@ -39,9 +39,113 @@ from architectures import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
+    """Find Hamiltonian file in examples or user directories"""
+    
+    # If absolute path or relative path that exists, use as-is
+    if hamiltonian_path.is_absolute() or hamiltonian_path.exists():
+        return hamiltonian_path
+    
+    # Check user directory first
+    user_path = Path("user_hamiltonians") / hamiltonian_path
+    if user_path.exists():
+        logger.info(f"Found in user directory: {user_path}")
+        return user_path
+    
+    # Check examples directory
+    examples_path = Path("examples") / hamiltonian_path
+    if examples_path.exists():
+        logger.info(f"Found in examples directory: {examples_path}")
+        return examples_path
+    
+    # Not found
+    raise ValueError(
+        f"Hamiltonian file not found: {hamiltonian_path}\n"
+        f"Searched in:\n"
+        f"  • Current directory\n"
+        f"  • user_hamiltonians/\n"
+        f"  • examples/\n\n"
+        f"Use 'symqnet-add {hamiltonian_path}' to add your file to the system."
+    )
+
+
+def run_single_rollout(policy, simulator, max_steps: int, rollout_id: int):
+    """Run a single policy rollout to estimate Hamiltonian parameters."""
+    
+    measurements = []
+    parameter_estimates = []
+    
+    # Initial measurement
+    current_measurement = simulator.get_initial_measurement()
+    
+    for step in range(max_steps):
+        # Get action from policy
+        action_info = policy.get_action(current_measurement)
+        
+        # Execute measurement
+        measurement_result = simulator.execute_measurement(
+            qubit_indices=action_info['qubits'],
+            pauli_operators=action_info['operators'],
+            evolution_time=action_info['time']
+        )
+        
+        measurements.append({
+            'step': step,
+            'action': action_info,
+            'result': measurement_result
+        })
+        
+        # Get parameter estimate from policy
+        param_estimate = policy.get_parameter_estimate()
+        parameter_estimates.append(param_estimate)
+        
+        # Update current measurement for next step
+        current_measurement = measurement_result['expectation_values']
+        
+        # Early stopping if converged
+        if step > 5 and policy.has_converged(parameter_estimates):
+            logger.debug(f"Rollout {rollout_id} converged at step {step}")
+            break
+    
+    return {
+        'rollout_id': rollout_id,
+        'measurements': measurements,
+        'parameter_estimates': parameter_estimates,
+        'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
+        'convergence_step': step
+    }
+
+
+def print_summary(results: Dict):
+    """Print a formatted summary of results."""
+    
+    print("\n" + "="*60)
+    print("🎯 SYMQNET MOLECULAR OPTIMIZATION RESULTS")
+    print("="*60)
+    
+    if 'coupling_parameters' in results:
+        print("\n📊 COUPLING PARAMETERS (J):")
+        for i, (mean, ci_low, ci_high) in enumerate(results['coupling_parameters']):
+            print(f"  J_{i}: {mean:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
+    
+    if 'field_parameters' in results:
+        print("\n🧲 FIELD PARAMETERS (h):")
+        for i, (mean, ci_low, ci_high) in enumerate(results['field_parameters']):
+            print(f"  h_{i}: {mean:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
+    
+    if 'total_uncertainty' in results:
+        print(f"\n📏 Total Parameter Uncertainty: {results['total_uncertainty']:.6f}")
+    
+    if 'avg_measurements' in results:
+        print(f"📐 Average Measurements Used: {results['avg_measurements']:.1f}")
+    
+    print("="*60)
+
+
 @click.command()
 @click.option('--hamiltonian', '-h', 
-              type=click.Path(exists=True, path_type=Path),
+              type=click.Path(path_type=Path),
               required=True,
               help='Path to molecular Hamiltonian JSON file')
 @click.option('--shots', '-s', 
@@ -92,15 +196,21 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
     ⚠️  IMPORTANT: Only supports 10-qubit molecular Hamiltonians
     """
     
-    # Setup
+    # Setup logging first
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
     setup_logging(verbose)
+
+    # Find hamiltonian file early
+    try:
+        hamiltonian_path = find_hamiltonian_file(hamiltonian)
+    except ValueError as e:
+        raise click.ClickException(str(e))
     
     # IMMEDIATE QUBIT VALIDATION - Fail fast with clear message
     try:
-        with open(hamiltonian, 'r') as f:
+        with open(hamiltonian_path, 'r') as f:
             hamiltonian_preview = json.load(f)
         
         n_qubits = hamiltonian_preview.get('n_qubits', 0)
@@ -122,9 +232,9 @@ Required: 10 qubits
             raise click.ClickException(f"Unsupported qubit count: {n_qubits} != 10")
             
     except json.JSONDecodeError:
-        raise click.ClickException(f"Invalid JSON file: {hamiltonian}")
+        raise click.ClickException(f"Invalid JSON file: {hamiltonian_path}")
     except FileNotFoundError:
-        raise click.ClickException(f"Hamiltonian file not found: {hamiltonian}")
+        raise click.ClickException(f"Hamiltonian file not found: {hamiltonian_path}")
     
     # Set device
     if device == 'auto':
@@ -139,14 +249,13 @@ Required: 10 qubits
     logger.info(f"✅ Validated: {n_qubits}-qubit Hamiltonian (supported)")
     
     try:
-
         # Validate inputs
-        validate_inputs(hamiltonian, shots, confidence, max_steps, n_rollouts)
+        validate_inputs(hamiltonian_path, shots, confidence, max_steps, n_rollouts)
         
         # 1. Parse Hamiltonian
         logger.info("🔍 Parsing molecular Hamiltonian...")
         parser = HamiltonianParser()
-        hamiltonian_data = parser.load_hamiltonian(hamiltonian)
+        hamiltonian_data = parser.load_hamiltonian(hamiltonian_path)
         logger.info(f"Loaded {hamiltonian_data['n_qubits']}-qubit Hamiltonian "
                    f"with {len(hamiltonian_data['pauli_terms'])} terms")
         
@@ -214,76 +323,6 @@ Required: 10 qubits
         logger.error(f"❌ Error: {e}")
         raise click.ClickException(str(e))
 
-def run_single_rollout(policy, simulator, max_steps: int, rollout_id: int):
-    """Run a single policy rollout to estimate Hamiltonian parameters."""
-    
-    measurements = []
-    parameter_estimates = []
-    
-    # Initial measurement
-    current_measurement = simulator.get_initial_measurement()
-    
-    for step in range(max_steps):
-        # Get action from policy
-        action_info = policy.get_action(current_measurement)
-        
-        # Execute measurement
-        measurement_result = simulator.execute_measurement(
-            qubit_indices=action_info['qubits'],
-            pauli_operators=action_info['operators'],
-            evolution_time=action_info['time']
-        )
-        
-        measurements.append({
-            'step': step,
-            'action': action_info,
-            'result': measurement_result
-        })
-        
-        # Get parameter estimate from policy
-        param_estimate = policy.get_parameter_estimate()
-        parameter_estimates.append(param_estimate)
-        
-        # Update current measurement for next step
-        current_measurement = measurement_result['expectation_values']
-        
-        # Early stopping if converged
-        if step > 5 and policy.has_converged(parameter_estimates):
-            logger.debug(f"Rollout {rollout_id} converged at step {step}")
-            break
-    
-    return {
-        'rollout_id': rollout_id,
-        'measurements': measurements,
-        'parameter_estimates': parameter_estimates,
-        'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
-        'convergence_step': step
-    }
-
-def print_summary(results: Dict):
-    """Print a formatted summary of results."""
-    
-    print("\n" + "="*60)
-    print("🎯 SYMQNET MOLECULAR OPTIMIZATION RESULTS")
-    print("="*60)
-    
-    if 'coupling_parameters' in results:
-        print("\n📊 COUPLING PARAMETERS (J):")
-        for i, (mean, ci_low, ci_high) in enumerate(results['coupling_parameters']):
-            print(f"  J_{i}: {mean:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
-    
-    if 'field_parameters' in results:
-        print("\n🧲 FIELD PARAMETERS (h):")
-        for i, (mean, ci_low, ci_high) in enumerate(results['field_parameters']):
-            print(f"  h_{i}: {mean:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
-    
-    if 'total_uncertainty' in results:
-        print(f"\n📏 Total Parameter Uncertainty: {results['total_uncertainty']:.6f}")
-    
-    if 'avg_measurements' in results:
-        print(f"📐 Average Measurements Used: {results['avg_measurements']:.1f}")
-    
-    print("="*60)
 
 if __name__ == '__main__':
     main()

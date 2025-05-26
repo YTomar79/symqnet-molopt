@@ -16,12 +16,12 @@ pip install symqnet-molopt
 
 **SymQNet-MolOpt now supports any molecular system** with intelligent performance scaling:
 
-| Qubit Count | Performance | Status | Use Case |
-|-------------|-------------|---------|----------|
-| 2-6 qubits  | 85-95%     | ✅ Good | Small molecules (H₂, LiH) |
-| 8-12 qubits | 95-100%    | ⭐ Excellent | Medium molecules (H₂O, NH₃) |
-| **10 qubits** | **100%**   | 🎯 **OPTIMAL** | **Maximum accuracy** |
-| 14-18 qubits | 75-90%     | ⚠️ Moderate | Large molecules (C₂H₄) |
+| Qubit Count | Use Case |
+|-------------|----------|
+| 2-6 qubits  |  Small molecules (H₂, LiH) |
+| 8-12 qubits | Medium molecules (H₂O, NH₃) |
+| **10 qubits** |  **Maximum accuracy** |
+| 14-18 qubits | Large molecules (C₂H₄) |
 
 
 ## 📖 How to Use

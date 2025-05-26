@@ -219,7 +219,7 @@ class PolicyEngine:
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=L_input,  # ✅ FIXED: 82 (the input dimension), not 100!
+            L=82,  # ✅ FIXED: 82 (the input dimension), not 100!
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,

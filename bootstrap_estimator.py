@@ -5,7 +5,6 @@ Bootstrap estimator for uncertainty quantification
 import numpy as np
 from typing import Dict, List, Any, Tuple
 import logging
-from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -31,27 +30,53 @@ class BootstrapEstimator:
         logger.info(f"Computing {self.confidence_level:.1%} confidence intervals "
                    f"from {len(estimates)} rollouts")
         
+        # Validate input
+        if not estimates:
+            raise ValueError("No rollout estimates provided")
+        
         # Extract final parameter estimates from each rollout
         final_estimates = []
         convergence_steps = []
         
-        for estimate in estimates:
-            if estimate['final_estimate'] is not None:
+        for i, estimate in enumerate(estimates):
+            if estimate.get('final_estimate') is not None:
                 final_estimates.append(estimate['final_estimate'])
-                convergence_steps.append(estimate['convergence_step'])
+                convergence_steps.append(estimate.get('convergence_step', 0))
+            else:
+                logger.warning(f"Rollout {i} has no final estimate - skipping")
         
         if not final_estimates:
-            raise ValueError("No valid parameter estimates found")
+            raise ValueError("No valid parameter estimates found in any rollout")
+        
+        # Check minimum samples for reliable bootstrap
+        if len(final_estimates) < 3:
+            logger.warning(
+                f"Only {len(final_estimates)} valid rollouts found. "
+                f"Bootstrap confidence intervals may be unreliable."
+            )
         
         final_estimates = np.array(final_estimates)  # [n_rollouts, n_params]
         
+        # Validate parameter count for 10-qubit system
+        expected_params = 19  # 9 coupling + 10 field
+        if final_estimates.shape[1] != expected_params:
+            raise ValueError(
+                f"Expected {expected_params} parameters for 10-qubit system, "
+                f"got {final_estimates.shape[1]}. Check your parameter estimation."
+            )
+        
         # Split into coupling and field parameters
-        # Assuming first (n_qubits-1) are coupling, rest are field
-        n_qubits = 10  # Adjust based on your system
-        n_coupling = n_qubits - 1
+        n_qubits = 10
+        n_coupling = n_qubits - 1  # 9
         
         coupling_estimates = final_estimates[:, :n_coupling]
         field_estimates = final_estimates[:, n_coupling:]
+        
+        # Validate field parameter count
+        if field_estimates.shape[1] != n_qubits:
+            logger.warning(
+                f"Expected {n_qubits} field parameters, got {field_estimates.shape[1]}"
+            )
         
         # Compute bootstrap confidence intervals
         coupling_results = self._bootstrap_parameters(coupling_estimates, "coupling")
@@ -127,6 +152,11 @@ class BootstrapEstimator:
         
         new_mean = np.mean(new_estimates, axis=0)
         new_var = np.var(new_estimates, axis=0)
+        
+        # Add small epsilon to prevent division by zero
+        epsilon = 1e-10
+        prior_var = np.maximum(prior_var, epsilon)
+        new_var = np.maximum(new_var, epsilon)
         
         # Bayesian update formulas
         posterior_var = 1.0 / (1.0/prior_var + 1.0/new_var)

@@ -2,7 +2,7 @@
 
 Neural network-guided parameter estimation for molecular Hamiltonians with **universal qubit support**.
 
-[![PyPI version](https://badge.fury.io/py/symqnet-molopt.svg)](https://pypi.org/project/symqnet-molopt/)
+
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Universal Support](https://img.shields.io/badge/qubits-2%2B%20supported-green.svg)](https://github.com/YTomar79/symqnet-molopt)
 
@@ -22,7 +22,7 @@ pip install symqnet-molopt
 | 8-12 qubits | 95-100%    | ⭐ Excellent | Medium molecules (H₂O, NH₃) |
 | **10 qubits** | **100%**   | 🎯 **OPTIMAL** | **Maximum accuracy** |
 | 14-18 qubits | 75-90%     | ⚠️ Moderate | Large molecules (C₂H₄) |
-| 20+ qubits  | 60-75%     | ⚠️ Reduced | Very large systems |
+
 
 ## 📖 How to Use
 
@@ -34,7 +34,7 @@ symqnet-molopt --hamiltonian your_molecule.json --output results.json
 
 ### 🧪 Example Systems
 
-#### Small Molecule (4 qubits, 85% performance)
+#### Small Molecule (4 qubits)
 symqnet-molopt
 --hamiltonian examples/H2_4q.json
 --output h2_results.json
@@ -42,7 +42,7 @@ symqnet-molopt
 
  
 
-#### Medium Molecule (10 qubits, 100% performance ⭐)
+#### Medium Molecule (10 qubits)
 symqnet-molopt
 --hamiltonian examples/H2O_10q.json
 --output h2o_results.json
@@ -52,7 +52,7 @@ symqnet-molopt
 
  
 
-#### Large Molecule (15 qubits, 75% performance)
+#### Large Molecule (15 qubits)
 symqnet-molopt
 --hamiltonian examples/large_mol_15q.json
 --output large_results.json
@@ -116,12 +116,6 @@ symqnet-molopt --hamiltonian large_mol_16q.json --output results.json
 
  
 
-### Performance Expectations
-🎯 OPTIMAL (10 qubits): Maximum accuracy, fastest convergence
-⭐ EXCELLENT (8-12 qubits): Near-optimal performance
-✅ GOOD (6-14 qubits): Reliable results with slight degradation
-⚠️ MODERATE (4-6, 16-20 qubits): Usable with increased uncertainty
-🔄 REDUCED (20+ qubits): Significant degradation, use with caution
 
  
 
@@ -192,24 +186,7 @@ symqnet-molopt --hamiltonian large_system.json --output results.json --no-perfor
 - **PyTorch 1.12+**
 - **NumPy, SciPy, Click**
 - **Universal qubit support** (2+ qubits)
-- **Optimal at 10 qubits** ⭐
 
-## 🎯 Best Practices
-
-### For Maximum Accuracy
-- Use **10-qubit** molecular representations when possible
-- Employ larger basis sets to reach 10 qubits naturally
-- Validate results against known benchmarks
-
-### For Larger Systems (>10 qubits)
-- Increase `--shots` and `--n-rollouts` as recommended by CLI
-- Use `--show-performance-analysis` to understand limitations
-- Cross-validate with traditional quantum chemistry methods
-
-### For Smaller Systems (<10 qubits)
-- Results remain reliable with slight performance reduction
-- Consider expanding active space to reach 10 qubits if possible
-- Use standard parameters (automatically optimized)
 
 ## 🌍 Universal Capabilities
 
@@ -220,25 +197,6 @@ symqnet-molopt --hamiltonian large_system.json --output results.json --no-perfor
 - **Performance transparency**
 - **Backward compatibility** with existing 10-qubit workflows
 
-### 🎯 Optimization Tips
-- **10-qubit systems**: Use standard parameters for optimal results
-- **Non-10-qubit systems**: Follow CLI recommendations for best accuracy
-- **Large systems**: Expect longer runtime and higher uncertainty
-- **Small systems**: Consider basis set expansion for better performance
-
-## 📈 Performance Curve
-
-Performance
-100% | 🎯
-| ⭐⭐⭐⭐⭐
-90% | ⭐⭐⭐ ⭐⭐⭐
-|⭐⭐ ⭐⭐
-80% |⭐ ⭐
-| ⭐
-70% | ⭐
-+--+--+--+--+--+--+--+--
-4 6 8 10 12 14 16 18
-Qubits
 
  
 

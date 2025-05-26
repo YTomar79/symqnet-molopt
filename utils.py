@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List
 import torch
+from datetime import datetime  # 🔧 FIX: Use datetime instead of pandas
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,8 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
             'generated_by': 'SymQNet Molecular Optimization CLI',
             'version': '1.0.0',
             'model_constraint': f'Trained for exactly {SUPPORTED_QUBITS} qubits',
-            'timestamp': str(pd.Timestamp.now()) if 'pd' in globals() else "unknown"
+            # 🔧 FIX: Use datetime instead of pandas
+            'timestamp': datetime.now().isoformat()
         }
     }
     
@@ -124,6 +126,9 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
             'true_coupling': hamiltonian_data['true_parameters'].get('coupling', []),
             'true_field': hamiltonian_data['true_parameters'].get('field', [])
         }
+    
+    # 🔧 ADD: Create output directory if it doesn't exist
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_path, 'w') as f:
         json.dump(output_data, f, indent=2)
@@ -215,7 +220,6 @@ def print_qubit_constraint_info():
 {'='*50}
 """)
 
-# Additional validation functions
 def check_model_compatibility(n_qubits: int) -> bool:
     """Check if qubit count is compatible with trained model."""
     return n_qubits == SUPPORTED_QUBITS
@@ -244,3 +248,60 @@ def suggest_qubit_mapping(current_qubits: int) -> str:
             f"   • Use smaller basis set\n"
             f"   • Apply symmetry reduction techniques"
         )
+
+# 🔧 ADD: Additional utility functions
+def format_parameter_results(coupling_params: List[float], field_params: List[float], 
+                           uncertainties: List[float] = None) -> str:
+    """Format parameter results for display."""
+    
+    result_str = "🎯 PARAMETER ESTIMATION RESULTS\n"
+    result_str += "=" * 40 + "\n"
+    
+    result_str += "\n📊 COUPLING PARAMETERS (J):\n"
+    for i, param in enumerate(coupling_params):
+        if uncertainties and i < len(uncertainties):
+            result_str += f"  J_{i}: {param:.6f} ± {uncertainties[i]:.6f}\n"
+        else:
+            result_str += f"  J_{i}: {param:.6f}\n"
+    
+    result_str += "\n🧲 FIELD PARAMETERS (h):\n"
+    for i, param in enumerate(field_params):
+        uncertainty_idx = len(coupling_params) + i
+        if uncertainties and uncertainty_idx < len(uncertainties):
+            result_str += f"  h_{i}: {param:.6f} ± {uncertainties[uncertainty_idx]:.6f}\n"
+        else:
+            result_str += f"  h_{i}: {param:.6f}\n"
+    
+    return result_str
+
+def estimate_computation_time(n_rollouts: int, max_steps: int, shots: int) -> str:
+    """Estimate computation time for given parameters."""
+    
+    # Rough estimates based on typical performance
+    seconds_per_measurement = shots / 1000.0  # Rough estimate
+    total_measurements = n_rollouts * max_steps
+    estimated_seconds = total_measurements * seconds_per_measurement
+    
+    if estimated_seconds < 60:
+        return f"~{estimated_seconds:.0f} seconds"
+    elif estimated_seconds < 3600:
+        return f"~{estimated_seconds/60:.1f} minutes"
+    else:
+        return f"~{estimated_seconds/3600:.1f} hours"
+
+def validate_output_path(output_path: Path) -> bool:
+    """Validate that output path is writable."""
+    
+    try:
+        # Try to create parent directory
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Try to create a test file
+        test_file = output_path.parent / ".test_write"
+        test_file.touch()
+        test_file.unlink()
+        
+        return True
+    except (PermissionError, OSError) as e:
+        logger.error(f"Cannot write to output path {output_path}: {e}")
+        return False

@@ -1,13 +1,4 @@
-# ============================================================================
-# FIX: Update policy_engine.py for PyTorch 2.6
-# ============================================================================
-
-# Let's check the current PyTorch version first
-import torch
-print(f"🔍 PyTorch version: {torch.__version__}")
-
-# Now let's fix the policy_engine.py file
-policy_engine_content = """
+"""
 Policy Engine for SymQNet integration using EXACT architectures
 FIXED for PyTorch 2.6 weights_only issue
 """
@@ -284,10 +275,3 @@ class PolicyEngine:
         variance = np.var(recent_estimates, axis=0)
         
         return np.all(variance < self.convergence_threshold)
-
-
-# Write the fixed version
-with open("policy_engine.py", "w") as f:
-    f.write(policy_engine_content)
-
-print("✅ Fixed policy_engine.py for PyTorch 2.6!")

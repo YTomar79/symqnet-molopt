@@ -284,7 +284,7 @@ class PolicyEngine:
         variance = np.var(recent_estimates, axis=0)
         
         return np.all(variance < self.convergence_threshold)
-'''
+
 
 # Write the fixed version
 with open("policy_engine.py", "w") as f:

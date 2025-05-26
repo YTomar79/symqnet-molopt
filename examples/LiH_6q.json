@@ -1,0 +1,40 @@
+{
+  "format": "openfermion",
+  "molecule": "LiH",
+  "basis": "sto-3g",
+  "n_qubits": 6,
+  "pauli_terms": [
+    {
+      "coefficient": -7.8384,
+      "pauli_string": "IIIIII"
+    },
+    {
+      "coefficient": 0.1809,
+      "pauli_string": "IIIIIZ"
+    },
+    {
+      "coefficient": 0.1809,
+      "pauli_string": "IIIIZI"
+    },
+    {
+      "coefficient": -0.2436,
+      "pauli_string": "IIIZII"
+    },
+    {
+      "coefficient": 0.1665,
+      "pauli_string": "IIXIIX"
+    },
+    {
+      "coefficient": 0.1665,
+      "pauli_string": "IIYIIY"
+    },
+    {
+      "coefficient": 0.1743,
+      "pauli_string": "IZIIZI"
+    }
+  ],
+  "true_parameters": {
+    "coupling": [0.1665, 0.1665, 0.1743, -0.2436, 0.1809],
+    "field": [0.1809, 0.0, 0.0, 0.0, 0.0, 0.0]
+  }
+}

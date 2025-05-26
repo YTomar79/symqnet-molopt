@@ -89,7 +89,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
     """
     SymQNet Molecular Optimization CLI
     
-    Estimates molecular Hamiltonian parameters using trained SymQNet policy.
+    ⚠️  IMPORTANT: Only supports 10-qubit molecular Hamiltonians
     """
     
     # Setup
@@ -97,6 +97,34 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
         logging.getLogger().setLevel(logging.DEBUG)
     
     setup_logging(verbose)
+    
+    # IMMEDIATE QUBIT VALIDATION - Fail fast with clear message
+    try:
+        with open(hamiltonian, 'r') as f:
+            hamiltonian_preview = json.load(f)
+        
+        n_qubits = hamiltonian_preview.get('n_qubits', 0)
+        if n_qubits != 10:
+            error_msg = f"""
+❌ INCOMPATIBLE HAMILTONIAN: SymQNet-MolOpt only supports 10-qubit systems
+
+Your Hamiltonian: {n_qubits} qubits
+Required: 10 qubits
+
+💡 SOLUTIONS:
+   🔧 Create 10-qubit examples:  symqnet-examples
+   📖 Use provided example:     --hamiltonian examples/H2O_10q.json
+   🧮 Map your molecule:        {suggest_qubit_mapping(n_qubits)}
+
+📚 Learn more: https://github.com/YTomar79/symqnet-molopt#qubit-constraints
+"""
+            print(error_msg)
+            raise click.ClickException(f"Unsupported qubit count: {n_qubits} != 10")
+            
+    except json.JSONDecodeError:
+        raise click.ClickException(f"Invalid JSON file: {hamiltonian}")
+    except FileNotFoundError:
+        raise click.ClickException(f"Hamiltonian file not found: {hamiltonian}")
     
     # Set device
     if device == 'auto':
@@ -108,7 +136,10 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
     torch.manual_seed(seed)
     np.random.seed(seed)
     
+    logger.info(f"✅ Validated: {n_qubits}-qubit Hamiltonian (supported)")
+    
     try:
+
         # Validate inputs
         validate_inputs(hamiltonian, shots, confidence, max_steps, n_rollouts)
         

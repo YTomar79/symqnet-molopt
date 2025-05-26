@@ -6,19 +6,19 @@ Quantum neural network-enabled optimization for molecular Hamiltonian parameter 
 
 pip install symqnet-molopt
 
-text
+ 
 
 ## How to Use
 
 ### Validate Example Hamiltonians
 symqnet-add examples/H2O_10q.json --validate-only
 
-text
+ 
 
 ### Create Example Files
 symqnet-examples
 
-text
+ 
 
 ### Run the Optimization
 symqnet-molopt
@@ -28,12 +28,10 @@ symqnet-molopt
 --n-rollouts 5
 --max-steps 50
 
-text
 
 ### Add Your Own Hamiltonian
 symqnet-add my_molecule.json --validate-only
-
-text
+ 
 *(Only 10-qubit Hamiltonians are supported.)*
 
 ## Command Reference
@@ -59,7 +57,6 @@ text
 
 symqnet-molopt --hamiltonian examples/test_10q.json --output output.json --shots 512
 
-text
 
 ## Requirements
 

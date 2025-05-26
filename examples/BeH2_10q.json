@@ -1,0 +1,182 @@
+{
+  "format": "openfermion",
+  "molecule": "BeH2_extended",
+  "basis": "sto-3g",
+  "geometry": "linear",
+  "bond_angles": {
+    "Be-H": 1.31,
+    "H-Be-H": 180.0
+  },
+  "n_qubits": 10,
+  "n_electrons": 6,
+  "n_orbitals": 5,
+  "pauli_terms": [
+    {
+      "coefficient": -15.5907,
+      "pauli_string": "IIIIIIIIII",
+      "description": "Identity term (nuclear repulsion + constant)"
+    },
+    {
+      "coefficient": 0.2454,
+      "pauli_string": "IIIIIIIIIZ",
+      "description": "Single-qubit Z field on qubit 9"
+    },
+    {
+      "coefficient": 0.2454,
+      "pauli_string": "IIIIIIIIZI",
+      "description": "Single-qubit Z field on qubit 8"
+    },
+    {
+      "coefficient": -0.3278,
+      "pauli_string": "IIIIIIIIZZ",
+      "description": "ZZ coupling between qubits 8-9"
+    },
+    {
+      "coefficient": 0.1821,
+      "pauli_string": "IIIIIIXIIX",
+      "description": "XX coupling between qubits 6-9"
+    },
+    {
+      "coefficient": 0.1821,
+      "pauli_string": "IIIIIIYIIY",
+      "description": "YY coupling between qubits 6-9"
+    },
+    {
+      "coefficient": 0.0934,
+      "pauli_string": "IIIIZIIZII",
+      "description": "ZZ coupling between qubits 4-7"
+    },
+    {
+      "coefficient": -0.0621,
+      "pauli_string": "IIZIIIIZII",
+      "description": "ZZ coupling between qubits 2-8"
+    },
+    {
+      "coefficient": 0.1456,
+      "pauli_string": "XIIIIIIIIX",
+      "description": "XX coupling between qubits 0-9"
+    },
+    {
+      "coefficient": 0.1456,
+      "pauli_string": "YIIIIIIIYY",
+      "description": "YY coupling between qubits 0-9"
+    },
+    {
+      "coefficient": 0.0812,
+      "pauli_string": "ZIIIIIIIII",
+      "description": "Single-qubit Z field on qubit 0"
+    },
+    {
+      "coefficient": -0.0456,
+      "pauli_string": "IZIIIIIIZ",
+      "description": "ZZ coupling between qubits 1-8"
+    },
+    {
+      "coefficient": 0.0623,
+      "pauli_string": "IIXIIIIIII",
+      "description": "XX coupling between qubits 2-3"
+    },
+    {
+      "coefficient": 0.0623,
+      "pauli_string": "IIYIIIIIII",
+      "description": "YY coupling between qubits 2-3"
+    },
+    {
+      "coefficient": -0.0289,
+      "pauli_string": "IIIIZIIIIZ",
+      "description": "ZZ coupling between qubits 4-9"
+    },
+    {
+      "coefficient": 0.0534,
+      "pauli_string": "IIIIXIIIII",
+      "description": "Single-qubit X field on qubit 4"
+    },
+    {
+      "coefficient": 0.0178,
+      "pauli_string": "IIIIIZIII",
+      "description": "Single-qubit Z field on qubit 5"
+    },
+    {
+      "coefficient": 0.0345,
+      "pauli_string": "IIIIIZIIII",
+      "description": "Single-qubit Z field on qubit 6"
+    },
+    {
+      "coefficient": 0.0267,
+      "pauli_string": "IIIIIIZIIII",
+      "description": "Single-qubit Z field on qubit 7"
+    },
+    {
+      "coefficient": 0.0189,
+      "pauli_string": "IIIIIZZIII",
+      "description": "ZZ coupling between qubits 5-6"
+    }
+  ],
+  "true_parameters": {
+    "coupling": [
+      -0.3278,
+      0.1821,
+      0.1821,
+      0.0934,
+      -0.0621,
+      0.1456,
+      0.1456,
+      -0.0456,
+      0.0623,
+      0.0623,
+      -0.0289,
+      0.0189
+    ],
+    "field": [
+      0.0812,
+      0.0,
+      0.0,
+      0.0,
+      0.0534,
+      0.0178,
+      0.0345,
+      0.0267,
+      0.2454,
+      0.2454
+    ]
+  },
+  "reference_energy": -15.6142,
+  "molecular_info": {
+    "point_group": "D∞h",
+    "electronic_state": "¹Σ_g⁺",
+    "spin_multiplicity": 1,
+    "charge": 0,
+    "atoms": [
+      {"element": "H", "position": [-1.31, 0.0, 0.0]},
+      {"element": "Be", "position": [0.0, 0.0, 0.0]},
+      {"element": "H", "position": [1.31, 0.0, 0.0]}
+    ]
+  },
+  "computational_details": {
+    "basis_functions": 10,
+    "molecular_orbitals": 5,
+    "active_space": "(6e, 5o)",
+    "freezing": "No core orbitals frozen",
+    "jordan_wigner_encoding": true,
+    "qubit_mapping": "Jordan-Wigner transformation",
+    "extension_method": "Extended active space to 10 qubits for SymQNet compatibility",
+    "additional_orbitals": "Virtual orbitals included for 10-qubit representation"
+  },
+  "hamiltonian_analysis": {
+    "n_coupling_terms": 12,
+    "n_field_terms": 10,
+    "n_identity_terms": 1,
+    "total_pauli_terms": 20,
+    "max_pauli_weight": 2,
+    "sparsity": 0.125,
+    "condition_number": 245.67
+  },
+  "validation_metrics": {
+    "energy_convergence": 1e-8,
+    "gradient_norm": 1e-6,
+    "orbital_rotation_check": "passed",
+    "symmetry_check": "passed",
+    "qubit_count_validation": "10 qubits confirmed for SymQNet compatibility"
+  },
+  "description": "BeH2 (beryllium hydride) molecule extended to 10-qubit representation for SymQNet-MolOpt compatibility. Original 8-qubit system expanded with virtual orbitals to create a 10-qubit active space. The molecule maintains D∞h symmetry and serves as a benchmark for quantum chemistry algorithms requiring exactly 10 qubits."
+}

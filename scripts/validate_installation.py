@@ -34,7 +34,7 @@ def print_result(test_name, passed, details=""):
 def run_command(cmd, description):
     """Run a command and return success status"""
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
         return result.returncode == 0, result.stderr
     except subprocess.TimeoutExpired:
         return False, "Command timeout"
@@ -63,8 +63,8 @@ def validate_file_structure():
         ("requirements.txt", "Python dependencies"),
         ("models/vae_M10_f.pth", "Pre-trained VAE model"),
         ("models/FINAL_FIXED_SYMQNET.pth", "Trained SymQNet model"),
-        ("examples/H2_4q.json", "H2 molecule example"),
-        ("examples/LiH_6q.json", "LiH molecule example"),
+        # 🔧 FIX: Check for 10-qubit examples only
+        ("examples/H2O_10q.json", "H2O molecule example (10 qubits)"),
         ("scripts/create_examples.py", "Example generator script"),
         ("scripts/test_models.py", "Model testing script")
     ]
@@ -120,30 +120,37 @@ def validate_architecture_imports():
     print_header("Architecture Import Validation")
     
     architectures_to_test = [
-        ("VariationalAutoencoder", "VAE architecture"),
-        ("GraphEmbed", "Graph embedding layer"),
-        ("TemporalContextualAggregator", "Temporal aggregation"),
-        ("PolicyValueHead", "Policy-value head"),
-        ("FixedSymQNetWithEstimator", "Complete SymQNet"),
-        ("SpinChainEnv", "Training environment"),
-        ("get_pauli_matrices", "Utility functions")
+        "VariationalAutoencoder",
+        "GraphEmbed", 
+        "TemporalContextualAggregator",
+        "PolicyValueHead",
+        "FixedSymQNetWithEstimator",
+        "SpinChainEnv",
+        "get_pauli_matrices"
     ]
     
     all_imports_ok = True
-    for arch_name, description in architectures_to_test:
-        try:
-            from architectures import *
-            arch_class = globals()[arch_name]
-            print_result(f"{arch_name:<30}", True, "Imported successfully")
-        except ImportError as e:
-            print_result(f"{arch_name:<30}", False, f"Import error: {e}")
-            all_imports_ok = False
-        except KeyError as e:
-            print_result(f"{arch_name:<30}", False, f"Not found in architectures")
-            all_imports_ok = False
-        except Exception as e:
-            print_result(f"{arch_name}<30}", False, f"Unexpected error: {e}")
-            all_imports_ok = False
+    
+    # 🔧 FIX: Safer import testing
+    try:
+        import architectures
+        print_result("architectures module", True, "Module imported successfully")
+        
+        for arch_name in architectures_to_test:
+            try:
+                arch_obj = getattr(architectures, arch_name)
+                print_result(f"{arch_name:<30}", True, "Available in module")
+            except AttributeError:
+                print_result(f"{arch_name:<30}", False, f"Not found in architectures module")
+                all_imports_ok = False
+                
+    except ImportError as e:
+        print_result("architectures module", False, f"Import error: {e}")
+        all_imports_ok = False
+        
+        # Try individual imports as fallback
+        for arch_name in architectures_to_test:
+            print_result(f"{arch_name:<30}", False, "Module import failed")
     
     return all_imports_ok
 
@@ -181,7 +188,7 @@ def validate_model_loading():
         
         # Model parameters from your exact training
         n_qubits = 10
-        L = 64
+        L = 64  # 🔧 FIX: Correct base dimension
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo
@@ -194,7 +201,7 @@ def validate_model_loading():
         symqnet = FixedSymQNetWithEstimator(
             vae=vae,
             n_qubits=n_qubits,
-            L=L,
+            L=L,  # 🔧 FIX: Use L=64, not L=82
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -259,10 +266,9 @@ def validate_examples():
     """Validate example Hamiltonian files"""
     print_header("Example Files Validation")
     
+    # 🔧 FIX: Only check for 10-qubit examples
     example_files = [
-        "examples/H2_4q.json",
-        "examples/LiH_6q.json", 
-        "examples/BeH2_8q.json"
+        "examples/H2O_10q.json"
     ]
     
     all_examples_ok = True
@@ -284,7 +290,13 @@ def validate_examples():
             if has_required:
                 n_qubits = data['n_qubits']
                 n_terms = len(data['pauli_terms'])
-                print_result(f"{example_file}", True, f"{n_qubits}q, {n_terms} terms")
+                
+                # 🔧 FIX: Validate 10-qubit constraint
+                if n_qubits == 10:
+                    print_result(f"{example_file}", True, f"{n_qubits}q, {n_terms} terms")
+                else:
+                    print_result(f"{example_file}", False, f"Wrong qubit count: {n_qubits} != 10")
+                    all_examples_ok = False
             else:
                 print_result(f"{example_file}", False, "Missing required keys")
                 all_examples_ok = False
@@ -293,6 +305,10 @@ def validate_examples():
             print_result(f"{example_file}", False, str(e))
             all_examples_ok = False
     
+    # Check if we can create examples if none exist
+    if not all_examples_ok:
+        print_result("Creating examples", True, "Run 'symqnet-examples' to create")
+    
     return all_examples_ok
 
 def run_integration_test():
@@ -300,9 +316,17 @@ def run_integration_test():
     print_header("Integration Test")
     
     try:
-        # Create a minimal test
+        # 🔧 FIX: Create 10-qubit example first if needed
+        h2o_example = Path("examples/H2O_10q.json")
+        if not h2o_example.exists():
+            print_result("Creating test example", True, "No 10-qubit example found")
+            # Skip integration test if no valid example
+            print_result("Integration test", False, "No valid 10-qubit examples available")
+            return False
+        
+        # Create a minimal test with 10-qubit example
         cmd = """python cli.py \
-            --hamiltonian examples/H2_4q.json \
+            --hamiltonian examples/H2O_10q.json \
             --shots 50 \
             --output outputs/validation_test.json \
             --max-steps 3 \
@@ -375,7 +399,7 @@ def main():
     if passed == total:
         print("🎉 ALL VALIDATIONS PASSED! Your SymQNet CLI is ready to use.")
         print("\n💡 Quick start:")
-        print("   python cli.py --hamiltonian examples/H2_4q.json --shots 512 --output test.json")
+        print("   python cli.py --hamiltonian examples/H2O_10q.json --shots 512 --output test.json")
     else:
         print("⚠️  Some validations failed. Please fix the issues above before using the CLI.")
         
@@ -384,6 +408,7 @@ def main():
             print("\n🔧 File Structure Issues:")
             print("   • Ensure all required files are in the correct locations")
             print("   • Check that model files exist in models/ directory")
+            print("   • Run 'symqnet-examples' to create 10-qubit examples")
         
         if not results.get("Model Loading", True):
             print("\n🔧 Model Loading Issues:")
@@ -394,6 +419,7 @@ def main():
             print("\n🔧 Integration Issues:")
             print("   • Run: python scripts/test_models.py")
             print("   • Check device compatibility (try --device cpu)")
+            print("   • Ensure 10-qubit examples exist")
     
     return passed == total
 

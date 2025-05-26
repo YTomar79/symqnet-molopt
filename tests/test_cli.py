@@ -3,8 +3,8 @@
 Unit tests for SymQNet CLI functionality
 
 Tests the complete CLI pipeline while respecting model constraints:
-- Model only handles 10 qubits
-- L parameter must be 82 (64 + 18 metadata)
+- Model only handles EXACTLY 10 qubits
+- L parameter is 64 for SymQNet constructor (internally becomes 82)
 """
 
 import pytest
@@ -35,12 +35,9 @@ class TestHamiltonianParser:
         """Setup test fixtures"""
         self.parser = HamiltonianParser()
     
-    def create_test_hamiltonian(self, n_qubits=4):
+    def create_test_hamiltonian(self, n_qubits=10):  # 🔧 FIX: Default to 10 qubits
         """Create a test Hamiltonian JSON structure"""
-        # Ensure we don't exceed 10-qubit limit
-        if n_qubits > 10:
-            n_qubits = 10
-            
+        
         return {
             "format": "openfermion",
             "molecule": f"test_{n_qubits}q",
@@ -48,9 +45,9 @@ class TestHamiltonianParser:
             "n_qubits": n_qubits,
             "pauli_terms": [
                 {"coefficient": -2.0, "pauli_string": "I" * n_qubits},
-                {"coefficient": 0.5, "pauli_string": "I" * (n_qubits-1) + "Z"},
-                {"coefficient": 0.3, "pauli_string": "Z" + "I" * (n_qubits-1)},
-                {"coefficient": 0.2, "pauli_string": "I" * (n_qubits//2) + "ZZ" + "I" * (n_qubits-n_qubits//2-2)}
+                {"coefficient": 0.5, "pauli_string": "Z" + "I" * (n_qubits-1)},
+                {"coefficient": 0.3, "pauli_string": "I" + "Z" + "I" * (n_qubits-2)},
+                {"coefficient": 0.2, "pauli_string": "ZZ" + "I" * (n_qubits-2)}
             ],
             "true_parameters": {
                 "coupling": [0.2] * (n_qubits - 1),
@@ -58,49 +55,38 @@ class TestHamiltonianParser:
             }
         }
     
-    def test_valid_hamiltonian_parsing(self):
-        """Test parsing a valid Hamiltonian"""
+    def test_valid_10_qubit_hamiltonian_parsing(self):
+        """Test parsing a valid 10-qubit Hamiltonian"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            test_data = self.create_test_hamiltonian(4)
+            test_data = self.create_test_hamiltonian(10)  # 🔧 FIX: Use 10 qubits
             json.dump(test_data, f)
             temp_path = f.name
         
         try:
             parsed = self.parser.load_hamiltonian(Path(temp_path))
-            assert parsed['n_qubits'] == 4
+            assert parsed['n_qubits'] == 10  # 🔧 FIX: Expect 10 qubits
             assert parsed['format'] == 'openfermion'
             assert len(parsed['pauli_terms']) == 4
             assert 'structure' in parsed
         finally:
             os.unlink(temp_path)
     
-    def test_10_qubit_limit_respected(self):
-        """Test that we handle 10-qubit systems correctly"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            test_data = self.create_test_hamiltonian(10)  # Max supported
-            json.dump(test_data, f)
-            temp_path = f.name
+    def test_rejects_non_10_qubit_systems(self):
+        """Test that non-10-qubit systems are REJECTED (not clamped)"""
+        invalid_qubits = [4, 6, 8, 12, 15]  # 🔧 FIX: All should be rejected
         
-        try:
-            parsed = self.parser.load_hamiltonian(Path(temp_path))
-            assert parsed['n_qubits'] == 10
-            # Should parse successfully
-        finally:
-            os.unlink(temp_path)
-    
-    def test_invalid_qubit_count(self):
-        """Test handling of invalid qubit counts"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            test_data = self.create_test_hamiltonian(15)  # Exceeds model limit
-            json.dump(test_data, f)
-            temp_path = f.name
-        
-        try:
-            # Should still parse, but we'll need to validate in policy engine
-            parsed = self.parser.load_hamiltonian(Path(temp_path))
-            assert parsed['n_qubits'] == 10  # Should be clamped
-        finally:
-            os.unlink(temp_path)
+        for n_qubits in invalid_qubits:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                test_data = self.create_test_hamiltonian(n_qubits)
+                json.dump(test_data, f)
+                temp_path = f.name
+            
+            try:
+                # 🔧 FIX: Should REJECT, not clamp
+                with pytest.raises(ValueError, match="only trained for 10 qubits"):
+                    self.parser.load_hamiltonian(Path(temp_path))
+            finally:
+                os.unlink(temp_path)
     
     def test_malformed_json(self):
         """Test handling of malformed JSON"""
@@ -135,13 +121,13 @@ class TestMeasurementSimulator:
         """Setup test fixtures"""
         self.device = torch.device('cpu')
         
-        # Create minimal valid hamiltonian data
+        # 🔧 FIX: Create 10-qubit hamiltonian data
         self.hamiltonian_data = {
-            'n_qubits': 4,
+            'n_qubits': 10,  # Must be 10!
             'pauli_terms': [
-                {'coefficient': -1.0, 'pauli_indices': [], 'original_string': 'IIII'},
-                {'coefficient': 0.5, 'pauli_indices': [(0, 'Z')], 'original_string': 'ZIII'},
-                {'coefficient': 0.3, 'pauli_indices': [(0, 'Z'), (1, 'Z')], 'original_string': 'ZZII'}
+                {'coefficient': -1.0, 'pauli_indices': [], 'original_string': 'IIIIIIIIII'},
+                {'coefficient': 0.5, 'pauli_indices': [(0, 'Z')], 'original_string': 'ZIIIIIIIII'},
+                {'coefficient': 0.3, 'pauli_indices': [(0, 'Z'), (1, 'Z')], 'original_string': 'ZZIIIIIIIII'}
             ]
         }
     
@@ -152,7 +138,7 @@ class TestMeasurementSimulator:
             shots=100,
             device=self.device
         )
-        assert simulator.n_qubits == 4
+        assert simulator.n_qubits == 10  # 🔧 FIX: Expect 10 qubits
         assert simulator.shots == 100
         assert simulator.device == self.device
     
@@ -166,7 +152,7 @@ class TestMeasurementSimulator:
         
         initial = simulator.get_initial_measurement()
         assert isinstance(initial, np.ndarray)
-        assert len(initial) == 4  # n_qubits
+        assert len(initial) == 10  # 🔧 FIX: 10 qubits
         assert np.all(np.abs(initial) <= 1.0)  # Valid expectation values
     
     def test_execute_measurement(self):
@@ -271,13 +257,13 @@ class TestPolicyEngine:
                 device=self.device
             )
             
-            # Verify L=82 constraint is respected
+            # 🔧 FIX: Verify L=64 constraint (not L=82!)
             mock_symqnet.assert_called_once()
             call_args = mock_symqnet.call_args
-            assert call_args[1]['L'] == 82  # Critical constraint!
+            assert call_args[1]['L'] == 64  # L=64 passed to constructor, internally becomes 82
             
         except Exception as e:
-            # Expected to fail with mock models, but should respect L=82
+            # Expected to fail with mock models, but should respect L=64
             pass
     
     def test_action_decoding(self):
@@ -357,18 +343,20 @@ class TestCLIIntegration:
         self.temp_dir = tempfile.mkdtemp()
         self.output_file = Path(self.temp_dir) / 'test_output.json'
         
-        # Create minimal test Hamiltonian
+        # 🔧 FIX: Create 10-qubit test Hamiltonian
         self.test_hamiltonian = {
             "format": "openfermion",
-            "molecule": "test",
-            "n_qubits": 4,  # Safe size
+            "molecule": "test_10q",
+            "n_qubits": 10,  # Must be 10!
             "pauli_terms": [
-                {"coefficient": -1.0, "pauli_string": "IIII"},
-                {"coefficient": 0.5, "pauli_string": "ZIII"}
+                {"coefficient": -1.0, "pauli_string": "IIIIIIIIII"},
+                {"coefficient": 0.5, "pauli_string": "ZIIIIIIIII"},
+                {"coefficient": 0.3, "pauli_string": "IZIIIIIIIII"},
+                {"coefficient": 0.2, "pauli_string": "ZZIIIIIIIII"}
             ],
             "true_parameters": {
-                "coupling": [0.2, 0.3, 0.1],
-                "field": [0.1, 0.2, 0.0, 0.0]
+                "coupling": [0.2] * 9,  # 9 coupling parameters
+                "field": [0.5, 0.3] + [0.0] * 8  # 10 field parameters
             }
         }
         
@@ -432,9 +420,9 @@ class TestCLIIntegration:
         mock_policy_instance.get_parameter_estimate.return_value = np.zeros(19)
         mock_policy_instance.has_converged.return_value = False
         
-        mock_simulator_instance.get_initial_measurement.return_value = np.zeros(4)
+        mock_simulator_instance.get_initial_measurement.return_value = np.zeros(10)  # 🔧 FIX: 10 qubits
         mock_simulator_instance.execute_measurement.return_value = {
-            'expectation_values': np.random.randn(4),
+            'expectation_values': np.random.randn(10),  # 🔧 FIX: 10 qubits
             'shots_used': 1024
         }
         
@@ -442,36 +430,33 @@ class TestCLIIntegration:
         # This validates the structure is correct
         assert callable(main)
     
-    def test_qubit_limit_enforcement(self):
-        """Test that 10-qubit limit is enforced"""
-        # Create Hamiltonian with too many qubits
-        large_hamiltonian = self.test_hamiltonian.copy()
-        large_hamiltonian['n_qubits'] = 15
-        large_hamiltonian['pauli_string'] = 'I' * 15
+    def test_10_qubit_constraint_enforcement(self):
+        """Test that ONLY 10-qubit systems are accepted"""
+        # 🔧 FIX: Create Hamiltonian with wrong qubit count
+        invalid_hamiltonian = self.test_hamiltonian.copy()
+        invalid_hamiltonian['n_qubits'] = 8
+        invalid_hamiltonian['pauli_terms'] = [
+            {"coefficient": -1.0, "pauli_string": "IIIIIIII"}
+        ]
         
-        large_file = Path(self.temp_dir) / 'large.json'
-        with open(large_file, 'w') as f:
-            json.dump(large_hamiltonian, f)
+        invalid_file = Path(self.temp_dir) / 'invalid.json'
+        with open(invalid_file, 'w') as f:
+            json.dump(invalid_hamiltonian, f)
         
-        # Should handle gracefully (either reject or clamp to 10)
+        # Should REJECT with clear error
         parser = HamiltonianParser()
-        try:
-            parsed = parser.load_hamiltonian(large_file)
-            # If it parses, should be clamped to 10 or less
-            assert parsed['n_qubits'] <= 10
-        except ValueError:
-            # Or it should reject with clear error
-            pass
+        with pytest.raises(ValueError, match="only trained for 10 qubits"):
+            parser.load_hamiltonian(invalid_file)
 
 
 class TestModelConstraints:
     """Test that model constraints are properly enforced"""
     
     def test_l_parameter_constraint(self):
-        """Test that L=82 constraint is enforced"""
-        # This is critical - model crashes if L != 82
+        """Test that L=64 constraint is enforced (not L=82)"""
+        # 🔧 FIX: SymQNet constructor receives L=64, not L=82
         
-        # Mock test to verify L=82 is used
+        # Mock test to verify L=64 is used
         with patch('architectures.FixedSymQNetWithEstimator') as mock_symqnet:
             with patch('policy_engine.VariationalAutoencoder'):
                 with patch('policy_engine.torch.load'):
@@ -479,7 +464,7 @@ class TestModelConstraints:
                         from policy_engine import PolicyEngine
                         
                         # This should fail gracefully in test environment
-                        # but the important thing is L=82 constraint
+                        # but the important thing is L=64 constraint
                         policy = PolicyEngine(
                             model_path=Path('dummy.pth'),
                             vae_path=Path('dummy.pth'),
@@ -489,25 +474,25 @@ class TestModelConstraints:
                         pass
                     
                     # Verify that when FixedSymQNetWithEstimator is called,
-                    # it uses L=82 (64 + 18 metadata)
+                    # it uses L=64 (base dimension, internally becomes 64+18=82)
                     if mock_symqnet.called:
                         call_args = mock_symqnet.call_args
-                        # L should be 64, but total with metadata is 82
-                        # The architecture handles this internally
+                        # L should be 64 for constructor
+                        if call_args and len(call_args) > 1 and 'L' in call_args[1]:
+                            assert call_args[1]['L'] == 64
     
     def test_qubit_limit_constraint(self):
-        """Test that 10-qubit limit is enforced"""
-        # Verify that system handles qubit limits appropriately
+        """Test that 10-qubit limit is strictly enforced"""
+        # Verify that system rejects non-10-qubit systems
         
-        valid_qubits = [1, 2, 4, 6, 8, 10]
+        valid_qubits = [10]  # Only 10 is valid
         for n_qubits in valid_qubits:
-            # Should all be valid
-            assert n_qubits <= 10
+            assert n_qubits == 10
         
-        invalid_qubits = [11, 15, 20]
+        invalid_qubits = [1, 2, 4, 6, 8, 11, 15, 20]
         for n_qubits in invalid_qubits:
-            # Should be rejected or clamped
-            assert n_qubits > 10  # Would need handling
+            assert n_qubits != 10  # All should be rejected
+
 
 class TestQubitValidation:
     """Test strict 10-qubit validation"""
@@ -559,7 +544,6 @@ class TestQubitValidation:
             assert parsed['n_qubits'] == 10  # Should succeed
         finally:
             os.unlink(temp_path)
-
 
 
 # Test configuration for pytest

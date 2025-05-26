@@ -60,11 +60,11 @@ class PolicyEngine:
         logger.info(f"🔍 Checkpoint contains {len(state_dict)} parameters")
         logger.info(f"🔍 Keys: {list(state_dict.keys())[:10]}...")  # Show first 10 keys
         
-        # 🔧 TRAINING PARAMETERS (EXACT)
+        # 🔧 TRAINING PARAMETERS (EXACT FROM YOUR TRAINING CODE)
         n_qubits = 10
         L_vae = 64  # VAE latent dimension
         meta_dim = n_qubits + 3 + 5  # 10 + 3 + 5 = 18
-        L_total = L_vae + meta_dim   # 64 + 18 = 82 (CRITICAL!)
+        L_input = L_vae + meta_dim   # 64 + 18 = 82 (CRITICAL: This is the input dimension!)
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo  # 150 actions
@@ -77,7 +77,7 @@ class PolicyEngine:
             self._create_minimal_model(state_dict, n_qubits, L_vae, meta_dim, M_evo, A)
         else:
             logger.info("🎯 Detected full trained model")
-            self._create_full_model(state_dict, n_qubits, L_total, T, A, M_evo)
+            self._create_full_model(state_dict, n_qubits, L_input, T, A, M_evo)
         
         self.symqnet.eval()
         logger.info("✅ Models loaded with EXACT architecture match")
@@ -206,7 +206,7 @@ class PolicyEngine:
             logger.warning(f"⚠️ Estimator loading issue: {e}")
             self.symqnet.estimator.load_state_dict(estimator_state, strict=False)
     
-    def _create_full_model(self, state_dict, n_qubits, L_total, T, A, M_evo):
+    def _create_full_model(self, state_dict, n_qubits, L_input, T, A, M_evo):
         """Create full model matching EXACT training architecture."""
         
         # 🔧 EXACT graph connectivity from training
@@ -214,11 +214,12 @@ class PolicyEngine:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(self.device)
         edge_attr = torch.ones(len(edges), 1, dtype=torch.float32, device=self.device) * 0.1
         
-        # 🔧 CRITICAL: Use L_total (82) not L_vae (64)
+        # 🔧 CRITICAL FIX: Use L_input (82) as the parameter, NOT 100!
+        # This matches exactly what was used in training: L=82
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=L_total,  # ✅ FIXED: 82 not 64!
+            L=L_input,  # ✅ FIXED: 82 (the input dimension), not 100!
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -236,7 +237,7 @@ class PolicyEngine:
             if unexpected_keys:
                 logger.warning(f"Unexpected {len(unexpected_keys)} keys: {unexpected_keys[:5]}...")
             
-            logger.info("✅ Full model loaded with available weights")
+            logger.info("✅ Full model loaded with EXACT training architecture")
             
         except Exception as e:
             logger.error(f"❌ Full model loading failed: {e}")

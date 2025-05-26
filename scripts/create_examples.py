@@ -190,25 +190,20 @@ def create_test_hamiltonian(n_qubits=4):
     }
 
 def main():
-    """Main function to create all example files"""
+    """Main function to create ONLY 10-qubit example files"""
     
     # Create examples directory
     examples_dir = Path("../examples")
     examples_dir.mkdir(exist_ok=True)
     
-    # Define all examples
+    # ONLY 10-qubit examples allowed
     examples = [
-        ("H2_4q.json", create_h2_example()),
-        ("LiH_6q.json", create_lih_example()),
-        ("BeH2_8q.json", create_beh2_example()),
-        ("H2O_10q.json", create_water_example()),  # Matches SymQNet training
-        ("test_4q.json", create_test_hamiltonian(4)),
-        ("test_6q.json", create_test_hamiltonian(6)),
-        ("test_8q.json", create_test_hamiltonian(8)),
-        ("test_10q.json", create_test_hamiltonian(10))  # Matches SymQNet
+        ("H2O_10q.json", create_water_example()),  # Only valid example
+        ("test_10q.json", create_test_hamiltonian(10))  # Only valid test
     ]
     
-    print("🔬 Creating molecular Hamiltonian examples...")
+    print("🔬 Creating 10-qubit molecular Hamiltonian examples...")
+    print("⚠️  SymQNet-MolOpt only supports 10-qubit systems")
     print("=" * 50)
     
     created_files = []
@@ -226,6 +221,11 @@ def main():
             n_terms = len(loaded['pauli_terms'])
             n_qubits = loaded['n_qubits']
             
+            if n_qubits != 10:
+                print(f"❌ {filename:<15} | ERROR: {n_qubits} qubits (must be 10)")
+                os.unlink(filepath)
+                continue
+            
             print(f"✅ {filename:<15} | {n_qubits} qubits | {n_terms} terms")
             created_files.append(filepath)
             
@@ -233,39 +233,15 @@ def main():
             print(f"❌ {filename:<15} | Error: {e}")
     
     print("=" * 50)
-    print(f"📁 Created {len(created_files)} files in {examples_dir.resolve()}")
+    print(f"📁 Created {len(created_files)} valid 10-qubit examples")
     
-    # Summary statistics
-    print(f"\n📊 SUMMARY:")
-    total_files = len(created_files)
-    molecules = ["H2", "LiH", "BeH2", "H2O"]
-    test_files = [f for f in created_files if "test_" in f.name]
-    
-    print(f"  • Total examples: {total_files}")
-    print(f"  • Real molecules: {total_files - len(test_files)}")
-    print(f"  • Test cases: {len(test_files)}")
-    print(f"  • Qubit range: 4-10 qubits")
-    
-    # Quick validation test
-    print(f"\n🧪 VALIDATION TEST:")
-    try:
-        # Test loading with hamiltonian_parser
-        sys.path.append('..')
-        from hamiltonian_parser import HamiltonianParser
-        
-        parser = HamiltonianParser()
-        test_file = examples_dir / "H2_4q.json"
-        data = parser.load_hamiltonian(test_file)
-        
-        print(f"✅ Parser test passed: {data['molecule']} with {data['n_qubits']} qubits")
-        
-    except ImportError:
-        print("⚠️  Cannot import hamiltonian_parser for validation")
-    except Exception as e:
-        print(f"❌ Parser test failed: {e}")
-    
-    print(f"\n🎉 Example creation complete!")
-    print(f"💡 Use these files with: python cli.py --hamiltonian examples/<file>.json")
+    if len(created_files) == 0:
+        print("⚠️  No valid examples created - all must be exactly 10 qubits")
+    else:
+        print(f"\n🎯 USAGE:")
+        for filepath in created_files:
+            print(f"   symqnet-molopt --hamiltonian {filepath.name} --output results.json")
+
 
 if __name__ == "__main__":
     main()

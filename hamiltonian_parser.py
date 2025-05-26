@@ -1,5 +1,6 @@
 """
 Hamiltonian Parser for OpenFermion/Qiskit molecular Hamiltonians
+STRICT 10-QUBIT VALIDATION
 """
 
 import json
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 class HamiltonianParser:
     """Parse molecular Hamiltonians from various formats."""
     
+    # STRICT CONSTRAINT: SymQNet only supports exactly 10 qubits
+    SUPPORTED_QUBITS = 10
+    
     def __init__(self):
         self.supported_formats = ['openfermion', 'qiskit', 'custom']
     
@@ -20,24 +24,7 @@ class HamiltonianParser:
         """
         Load molecular Hamiltonian from JSON file.
         
-        Expected JSON format:
-        {
-            "format": "openfermion",  # or "qiskit", "custom"
-            "molecule": "LiH",
-            "basis": "sto-3g",
-            "n_qubits": 4,
-            "pauli_terms": [
-                {
-                    "coefficient": 0.5,
-                    "pauli_string": "ZZII"
-                },
-                ...
-            ],
-            "true_parameters": {  # Optional, for validation
-                "coupling": [0.5, 0.7, ...],
-                "field": [0.2, 0.3, ...]
-            }
-        }
+        IMPORTANT: SymQNet-MolOpt only supports exactly 10-qubit systems.
         """
         
         with open(file_path, 'r') as f:
@@ -50,6 +37,18 @@ class HamiltonianParser:
         if data['format'] not in self.supported_formats:
             raise ValueError(f"Unsupported format: {data['format']}. "
                            f"Supported: {self.supported_formats}")
+        
+        # STRICT QUBIT VALIDATION
+        n_qubits = data.get('n_qubits', 0)
+        if n_qubits != self.SUPPORTED_QUBITS:
+            raise ValueError(
+                f"❌ SymQNet-MolOpt is only trained for {self.SUPPORTED_QUBITS} qubits. "
+                f"Your Hamiltonian has {n_qubits} qubits.\n\n"
+                f"💡 To use this tool:\n"
+                f"   • Use a {self.SUPPORTED_QUBITS}-qubit molecular Hamiltonian\n"
+                f"   • Try the provided examples: H2O_10q.json\n"
+                f"   • Map your molecule to a {self.SUPPORTED_QUBITS}-qubit representation"
+            )
         
         # Parse based on format
         if data['format'] == 'openfermion':
@@ -68,6 +67,10 @@ class HamiltonianParser:
                 raise ValueError(f"Missing required field: {field}")
         
         n_qubits = data['n_qubits']
+        
+        # Double-check qubit constraint (should already be caught above)
+        assert n_qubits == self.SUPPORTED_QUBITS, "Internal error: qubit validation failed"
+        
         pauli_terms = []
         
         for term in data['pauli_terms']:
@@ -102,12 +105,11 @@ class HamiltonianParser:
     
     def _parse_qiskit(self, data: Dict) -> Dict[str, Any]:
         """Parse Qiskit-style Hamiltonian."""
-        # Similar to OpenFermion but with Qiskit-specific conventions
-        return self._parse_openfermion(data)  # For now, same format
+        return self._parse_openfermion(data)  # Same validation applies
     
     def _parse_custom(self, data: Dict) -> Dict[str, Any]:
         """Parse custom Hamiltonian format."""
-        return self._parse_openfermion(data)  # For now, same format
+        return self._parse_openfermion(data)  # Same validation applies
     
     def _pauli_string_to_indices(self, pauli_str: str) -> List[Tuple[int, str]]:
         """Convert Pauli string like 'XYZI' to [(0,'X'), (1,'Y'), (2,'Z')]."""
@@ -147,31 +149,34 @@ class HamiltonianParser:
         }
 
     @staticmethod
-    def create_example_hamiltonian(molecule: str = "H2", n_qubits: int = 4) -> Dict:
-        """Create an example molecular Hamiltonian for testing."""
+    def create_example_hamiltonian(molecule: str = "H2O", n_qubits: int = 10) -> Dict:
+        """Create an example molecular Hamiltonian (MUST be 10 qubits)."""
         
-        # Example H2 molecule Hamiltonian
-        if molecule == "H2" and n_qubits == 4:
+        if n_qubits != 10:
+            raise ValueError(
+                f"❌ SymQNet-MolOpt only supports 10-qubit systems. "
+                f"Cannot create {n_qubits}-qubit example."
+            )
+        
+        # Only provide 10-qubit examples
+        if molecule == "H2O" and n_qubits == 10:
             pauli_terms = [
-                {"coefficient": -1.0523732, "pauli_string": "IIII"},
-                {"coefficient": 0.39793742, "pauli_string": "IIIZ"},
-                {"coefficient": -0.39793742, "pauli_string": "IIZI"},
-                {"coefficient": -0.01128010, "pauli_string": "IIZZ"},
-                {"coefficient": 0.18093119, "pauli_string": "IXIX"},
-                {"coefficient": 0.18093119, "pauli_string": "IYIY"}
-            ]
-        elif molecule == "LiH" and n_qubits == 6:
-            pauli_terms = [
-                {"coefficient": -7.8384, "pauli_string": "IIIIII"},
-                {"coefficient": 0.1809, "pauli_string": "IIIIIZ"},
-                {"coefficient": 0.1809, "pauli_string": "IIIIZI"},
-                {"coefficient": -0.2436, "pauli_string": "IIIZII"},
-                {"coefficient": 0.1665, "pauli_string": "IIXIIX"},
-                {"coefficient": 0.1665, "pauli_string": "IIYIIY"},
-                {"coefficient": 0.1743, "pauli_string": "IZIIZI"}
+                {"coefficient": -74.9431, "pauli_string": "IIIIIIIIII"},
+                {"coefficient": 0.3421, "pauli_string": "IIIIIIIIIZ"},
+                {"coefficient": 0.3421, "pauli_string": "IIIIIIIIZI"},
+                {"coefficient": -0.4523, "pauli_string": "IIIIIIIIZZ"},
+                {"coefficient": 0.2134, "pauli_string": "IIIIIIXIIX"},
+                {"coefficient": 0.2134, "pauli_string": "IIIIIIYIIY"},
+                {"coefficient": 0.1876, "pauli_string": "IIIIZIIZII"},
+                {"coefficient": -0.0934, "pauli_string": "IIIZIIIZII"},
+                {"coefficient": 0.1623, "pauli_string": "IIXIIIIIIX"},
+                {"coefficient": 0.1623, "pauli_string": "IIYIIIIIIY"}
             ]
         else:
-            raise ValueError(f"Example for {molecule} with {n_qubits} qubits not available")
+            raise ValueError(
+                f"❌ Only 10-qubit H2O example available. "
+                f"SymQNet-MolOpt is trained specifically for 10-qubit systems."
+            )
         
         return {
             "format": "custom",
@@ -180,7 +185,8 @@ class HamiltonianParser:
             "n_qubits": n_qubits,
             "pauli_terms": pauli_terms,
             "true_parameters": {
-                "coupling": [0.18, 0.18, 0.17],
-                "field": [0.40, -0.40, -0.24]
-            }
+                "coupling": [0.2134, 0.2134, -0.4523, 0.1876, -0.0934, 0.1623, 0.1623, 0.0823, -0.0456],
+                "field": [0.3421, 0.3421, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            },
+            "description": f"{molecule} molecule optimized for SymQNet 10-qubit training"
         }

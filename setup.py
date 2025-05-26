@@ -63,9 +63,9 @@ def get_data_files():
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="1.0.4",  # 🔧 FIX: Increment version for CLI conflict fix
+    version="1.0.5",  # 🔧 FIX: Increment version for CLI conflict fix
     author="YTomar79",
-    author_email="ytomar79@example.com",  # Update with your actual email
+    author_email="yashm.tomar@gmail.com",  # Update with your actual email
     description="Molecular Hamiltonian parameter estimation using SymQNet neural networks",
     long_description=long_description,
     long_description_content_type="text/markdown",

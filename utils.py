@@ -70,70 +70,184 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
 
 def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 config: Dict[str, Any], output_path: Path):
-    """Save estimation results to JSON file."""
+    """Save estimation results to JSON file with robust error handling."""
     
-    # Double-check qubit constraint in results
-    n_qubits = hamiltonian_data.get('n_qubits', 0)
-    if n_qubits != SUPPORTED_QUBITS:
-        logger.warning(f"⚠️  Unexpected qubit count in results: {n_qubits} != {SUPPORTED_QUBITS}")
-    
-    output_data = {
-        'symqnet_results': {
-            'coupling_parameters': [
-                {
-                    'index': i,
-                    'mean': float(mean),
-                    'confidence_interval': [float(ci_low), float(ci_high)],
-                    'uncertainty': float(ci_high - ci_low)
+    try:
+        # Double-check qubit constraint in results
+        n_qubits = hamiltonian_data.get('n_qubits', 0)
+        if n_qubits != SUPPORTED_QUBITS:
+            logger.warning(f"⚠️  Unexpected qubit count in results: {n_qubits} != {SUPPORTED_QUBITS}")
+        
+        # 🔧 FIX: Robust parameter processing with error handling
+        coupling_parameters = []
+        if 'coupling_parameters' in results and results['coupling_parameters']:
+            for i, param_data in enumerate(results['coupling_parameters']):
+                try:
+                    if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
+                        mean, ci_low, ci_high = param_data[:3]
+                        coupling_parameters.append({
+                            'index': i,
+                            'mean': float(mean),
+                            'confidence_interval': [float(ci_low), float(ci_high)],
+                            'uncertainty': float(ci_high - ci_low) / 2.0  # ✅ FIXED: Divide by 2
+                        })
+                    else:
+                        logger.warning(f"Invalid coupling parameter format at index {i}: {param_data}")
+                except Exception as e:
+                    logger.warning(f"Error processing coupling parameter {i}: {e}")
+        
+        field_parameters = []
+        if 'field_parameters' in results and results['field_parameters']:
+            for i, param_data in enumerate(results['field_parameters']):
+                try:
+                    if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
+                        mean, ci_low, ci_high = param_data[:3]
+                        field_parameters.append({
+                            'index': i,
+                            'mean': float(mean),
+                            'confidence_interval': [float(ci_low), float(ci_high)],
+                            'uncertainty': float(ci_high - ci_low) / 2.0  # ✅ FIXED: Divide by 2
+                        })
+                    else:
+                        logger.warning(f"Invalid field parameter format at index {i}: {param_data}")
+                except Exception as e:
+                    logger.warning(f"Error processing field parameter {i}: {e}")
+        
+        # 🔧 FIX: Robust data extraction with defaults
+        output_data = {
+            'symqnet_results': {
+                'coupling_parameters': coupling_parameters,
+                'field_parameters': field_parameters,
+                'total_uncertainty': float(results.get('total_uncertainty', 0.0)),
+                'avg_measurements_used': float(results.get('avg_measurements', 0.0)),  # ✅ Match bootstrap key
+                'confidence_level': float(results.get('confidence_level', 0.95)),
+                'n_rollouts': int(results.get('n_rollouts', 0))
+            },
+            'hamiltonian_info': {
+                'molecule': hamiltonian_data.get('molecule', 'unknown'),
+                'n_qubits': hamiltonian_data.get('n_qubits', 0),
+                'n_pauli_terms': len(hamiltonian_data.get('pauli_terms', [])),
+                'format': hamiltonian_data.get('format', 'unknown'),
+                'supported_qubits': SUPPORTED_QUBITS,
+                'validation_passed': hamiltonian_data.get('n_qubits') == SUPPORTED_QUBITS
+            },
+            'experimental_config': {
+                'shots': config.get('shots', 0),
+                'max_steps': config.get('max_steps', 0),
+                'n_rollouts': config.get('n_rollouts', 0),
+                'confidence': float(config.get('confidence', 0.95)),
+                'device': config.get('device', 'cpu'),
+                'seed': config.get('seed', 42)
+            },
+            'metadata': {
+                'generated_by': 'SymQNet Molecular Optimization CLI',
+                'version': '1.0.3',  # ✅ Updated version
+                'model_constraint': f'Trained for exactly {SUPPORTED_QUBITS} qubits',
+                'timestamp': datetime.now().isoformat(),
+                'parameter_count': {
+                    'coupling': len(coupling_parameters),
+                    'field': len(field_parameters),
+                    'total': len(coupling_parameters) + len(field_parameters)
                 }
-                for i, (mean, ci_low, ci_high) in enumerate(results['coupling_parameters'])
-            ],
-            'field_parameters': [
-                {
-                    'index': i,
-                    'mean': float(mean),
-                    'confidence_interval': [float(ci_low), float(ci_high)],
-                    'uncertainty': float(ci_high - ci_low)
-                }
-                for i, (mean, ci_low, ci_high) in enumerate(results['field_parameters'])
-            ],
-            'total_uncertainty': float(results['total_uncertainty']),
-            'avg_measurements_used': float(results['avg_measurements']),
-            'confidence_level': float(results['confidence_level']),
-            'n_rollouts': int(results['n_rollouts'])
-        },
-        'hamiltonian_info': {
-            'molecule': hamiltonian_data.get('molecule', 'unknown'),
-            'n_qubits': hamiltonian_data['n_qubits'],
-            'n_pauli_terms': len(hamiltonian_data['pauli_terms']),
-            'format': hamiltonian_data['format'],
-            'supported_qubits': SUPPORTED_QUBITS,
-            'validation_passed': hamiltonian_data['n_qubits'] == SUPPORTED_QUBITS
-        },
-        'experimental_config': config,
-        'metadata': {
-            'generated_by': 'SymQNet Molecular Optimization CLI',
-            'version': '1.0.0',
-            'model_constraint': f'Trained for exactly {SUPPORTED_QUBITS} qubits',
-            # 🔧 FIX: Use datetime instead of pandas
-            'timestamp': datetime.now().isoformat()
+            }
         }
-    }
+        
+        # Add true parameters if available (for validation)
+        if hamiltonian_data.get('true_parameters'):
+            output_data['validation'] = {
+                'true_coupling': hamiltonian_data['true_parameters'].get('coupling', []),
+                'true_field': hamiltonian_data['true_parameters'].get('field', []),
+                'has_ground_truth': True
+            }
+        else:
+            output_data['validation'] = {'has_ground_truth': False}
+        
+        # 🔧 ROBUST: Create output directory and handle permissions
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            logger.error(f"Permission denied creating directory: {output_path.parent}")
+            raise
+        
+        # 🔧 ROBUST: Save with proper error handling
+        try:
+            with open(output_path, 'w') as f:
+                json.dump(output_data, f, indent=2, ensure_ascii=False)
+            
+            file_size = output_path.stat().st_size
+            logger.info(f"✅ Results saved to {output_path} ({file_size} bytes)")
+            
+            # 🔧 ADD: Log summary of what was saved
+            logger.info(f"📊 Saved {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters")
+            
+        except PermissionError:
+            logger.error(f"Permission denied writing to: {output_path}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to write JSON file: {e}")
+            raise
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to save results: {e}")
+        # 🔧 ADD: Try to save minimal results as fallback
+        try:
+            fallback_data = {
+                'error': str(e),
+                'partial_results': str(results)[:500],  # First 500 chars
+                'timestamp': datetime.now().isoformat()
+            }
+            fallback_path = output_path.with_suffix('.error.json')
+            with open(fallback_path, 'w') as f:
+                json.dump(fallback_data, f, indent=2)
+            logger.info(f"💾 Saved error info to {fallback_path}")
+        except:
+            pass
+        raise
+
+# 🔧 ADD: Function to verify JSON output structure
+def verify_json_output(output_path: Path) -> bool:
+    """Verify that the JSON output has correct structure."""
     
-    # Add true parameters if available (for validation)
-    if hamiltonian_data.get('true_parameters'):
-        output_data['validation'] = {
-            'true_coupling': hamiltonian_data['true_parameters'].get('coupling', []),
-            'true_field': hamiltonian_data['true_parameters'].get('field', [])
-        }
+    if not output_path.exists():
+        logger.error(f"Output file does not exist: {output_path}")
+        return False
     
-    # 🔧 ADD: Create output directory if it doesn't exist
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=2)
-    
-    logger.info(f"Results saved to {output_path}")
+    try:
+        with open(output_path, 'r') as f:
+            data = json.load(f)
+        
+        # Check required top-level keys
+        required_keys = ['symqnet_results', 'hamiltonian_info', 'experimental_config', 'metadata']
+        for key in required_keys:
+            if key not in data:
+                logger.error(f"Missing required key in JSON output: {key}")
+                return False
+        
+        # Check symqnet_results structure
+        symqnet = data['symqnet_results']
+        if 'coupling_parameters' not in symqnet or 'field_parameters' not in symqnet:
+            logger.error("Missing parameter arrays in symqnet_results")
+            return False
+        
+        # Check parameter structure
+        for param_list in [symqnet['coupling_parameters'], symqnet['field_parameters']]:
+            for param in param_list:
+                required_param_keys = ['index', 'mean', 'confidence_interval', 'uncertainty']
+                for param_key in required_param_keys:
+                    if param_key not in param:
+                        logger.error(f"Missing key in parameter: {param_key}")
+                        return False
+        
+        logger.info("✅ JSON output structure verified")
+        return True
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying JSON output: {e}")
+        return False
+
 
 def validate_hamiltonian_data(data: Dict[str, Any]) -> bool:
     """Validate loaded Hamiltonian data structure with 10-qubit constraint."""

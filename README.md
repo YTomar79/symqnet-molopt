@@ -212,7 +212,7 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🎉 Universal SymQNet: From 2 to 20+ Qubits, Optimized at 10
+## 🎉 Universal SymQNet
 
 **Install once, optimize any molecular system:**
 

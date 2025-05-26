@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Setup script for SymQNet Molecular Optimization CLI
+FIXED: CLI module name conflict resolved by renaming cli.py to symqnet_cli.py
 
 This package provides a command-line interface for molecular Hamiltonian 
 parameter estimation using trained SymQNet neural networks.
@@ -62,7 +63,7 @@ def get_data_files():
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="1.0.0",
+    version="1.0.3",  # 🔧 FIX: Increment version for CLI conflict fix
     author="YTomar79",
     author_email="ytomar79@example.com",  # Update with your actual email
     description="Molecular Hamiltonian parameter estimation using SymQNet neural networks",
@@ -75,9 +76,9 @@ setup(
         "Source Code": "https://github.com/YTomar79/symqnet-molopt",
     },
     
-    # Package discovery for flat structure
+    # 🔧 FIX: Updated py_modules to use symqnet_cli instead of cli
     py_modules=[
-        "cli",
+        "symqnet_cli",      # 🔧 RENAMED: cli.py → symqnet_cli.py
         "architectures", 
         "hamiltonian_parser",
         "measurement_simulator",
@@ -90,10 +91,10 @@ setup(
     # Include non-Python files
     include_package_data=True,
     
-    # 🔧 FIX: Use proper data_files function
+    # Use proper data_files function
     data_files=get_data_files(),
     
-    # 🔧 FIX: Simplified package_data
+    # Simplified package_data
     package_data={
         "": [
             "*.md",
@@ -102,18 +103,18 @@ setup(
         ],
     },
     
-    # Entry points for CLI
+    # 🔧 FIX: Updated entry points to use symqnet_cli module
     entry_points={
         "console_scripts": [
-            "symqnet-molopt=cli:main",
-            "symqnet-add=add_hamiltonian:main",
+            "symqnet-molopt=symqnet_cli:main",     # 🔧 FIXED: Use symqnet_cli instead of cli
+            "symqnet-add=add_hamiltonian:main",    # This one is fine
         ],
     },
     
     # Dependencies
     install_requires=read_requirements(),
     
-    # 🔧 FIX: Corrected extras_require with valid specifiers
+    # Corrected extras_require with valid specifiers
     extras_require={
         "dev": [
             "pytest>=6.0",
@@ -129,7 +130,7 @@ setup(
             "myst-parser>=0.17"
         ],
         "gpu": [
-            "torch>=1.12.0",  # 🔧 FIX: Removed invalid +cu118
+            "torch>=1.12.0",  # Fixed: Removed invalid +cu118
             "torch-geometric>=2.2.0"
         ],
         "jupyter": [
@@ -159,7 +160,7 @@ setup(
         "Environment :: Console",
     ],
     
-    # 🔧 FIX: Keywords as proper list of strings
+    # Keywords as proper list of strings
     keywords=[
         "quantum-computing",
         "molecular-simulation", 

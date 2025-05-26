@@ -74,6 +74,7 @@ setup(
     entry_points={
         "console_scripts": [
             "symqnet-molopt=cli:main",
+            "symqnet-add=add_hamiltonian:main",  # 🆕 NEW COMMAND
             "symqnet-validate=scripts.validate_installation:main",
             "symqnet-test=scripts.test_models:main",
             "symqnet-examples=scripts.create_examples:main",

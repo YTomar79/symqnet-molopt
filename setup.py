@@ -9,6 +9,7 @@ parameter estimation using trained SymQNet neural networks.
 from setuptools import setup, find_packages
 from pathlib import Path
 import os
+import glob
 
 # Read the contents of README file
 this_directory = Path(__file__).parent
@@ -25,30 +26,48 @@ def read_requirements():
         return [
             "torch>=1.12.0",
             "numpy>=1.21.0",
-            "qiskit>=0.39.0",
-            "openfermion>=1.5.0",
             "scipy>=1.9.0",
             "click>=8.0.0",
             "tqdm>=4.64.0",
             "matplotlib>=3.5.0",
-            "seaborn>=0.11.0",
-            "torch-geometric>=2.2.0",
             "pandas>=1.4.0",
-            "tensorboard>=2.8.0",
             "gym>=0.26.0"
         ]
+
+# Helper function to get data files safely
+def get_data_files():
+    """Get data files that actually exist"""
+    data_files = []
+    
+    # Examples
+    if Path("examples").exists():
+        example_files = glob.glob("examples/*.json")
+        if example_files:
+            data_files.append(("examples", example_files))
+    
+    # Models (if any)
+    if Path("models").exists():
+        model_files = glob.glob("models/*.pth")
+        if model_files:
+            data_files.append(("models", model_files))
+    
+    # Scripts (if any)
+    if Path("scripts").exists():
+        script_files = glob.glob("scripts/*.py")
+        if script_files:
+            data_files.append(("scripts", script_files))
+    
+    return data_files
 
 # Package metadata
 setup(
     name="symqnet-molopt",
     version="1.0.0",
-    # 🔧 FIX: Update author info
     author="YTomar79",
-    author_email="your.email@example.com",  # Update with your email
+    author_email="ytomar79@example.com",  # Update with your actual email
     description="Molecular Hamiltonian parameter estimation using SymQNet neural networks",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    # 🔧 FIX: Correct repository URLs
     url="https://github.com/YTomar79/symqnet-molopt",
     project_urls={
         "Bug Tracker": "https://github.com/YTomar79/symqnet-molopt/issues",
@@ -56,7 +75,7 @@ setup(
         "Source Code": "https://github.com/YTomar79/symqnet-molopt",
     },
     
-    # 🔧 FIX: Package discovery for flat structure
+    # Package discovery for flat structure
     py_modules=[
         "cli",
         "architectures", 
@@ -68,23 +87,17 @@ setup(
         "add_hamiltonian"
     ],
     
-    # 🔧 FIX: Include non-Python files correctly
+    # Include non-Python files
     include_package_data=True,
-    data_files=[
-        ("examples", ["examples/*.json"]) if Path("examples").exists() else ("examples", []),
-        ("models", ["models/*.pth"]) if Path("models").exists() else ("models", []),
-        ("scripts", ["scripts/*.py"]) if Path("scripts").exists() else ("scripts", []),
-    ],
     
-    # 🔧 FIX: Alternative file inclusion using MANIFEST.in
+    # 🔧 FIX: Use proper data_files function
+    data_files=get_data_files(),
+    
+    # 🔧 FIX: Simplified package_data
     package_data={
-        "": [  # Root package
-            "examples/*.json",
-            "models/*.pth", 
-            "scripts/*.py",
-            "tests/*.py",
+        "": [
             "*.md",
-            "requirements.txt",
+            "*.txt",
             "LICENSE"
         ],
     },
@@ -94,16 +107,13 @@ setup(
         "console_scripts": [
             "symqnet-molopt=cli:main",
             "symqnet-add=add_hamiltonian:main",
-            "symqnet-validate=scripts.validate_installation:main",
-            "symqnet-test=scripts.test_models:main",
-            "symqnet-examples=scripts.create_examples:main",
         ],
     },
     
     # Dependencies
     install_requires=read_requirements(),
     
-    # Extra dependencies for development
+    # 🔧 FIX: Corrected extras_require with valid specifiers
     extras_require={
         "dev": [
             "pytest>=6.0",
@@ -111,21 +121,21 @@ setup(
             "black>=22.0",
             "flake8>=4.0",
             "isort>=5.0",
-            "mypy>=0.950",
+            "mypy>=0.950"
         ],
         "docs": [
             "sphinx>=4.0",
             "sphinx-rtd-theme>=1.0",
-            "myst-parser>=0.17",
+            "myst-parser>=0.17"
         ],
         "gpu": [
-            "torch>=1.12.0+cu118",  # 🔧 Updated CUDA version
-            "torch-geometric>=2.2.0",
+            "torch>=1.12.0",  # 🔧 FIX: Removed invalid +cu118
+            "torch-geometric>=2.2.0"
         ],
         "jupyter": [
             "jupyter>=1.0",
             "ipywidgets>=7.0",
-            "plotly>=5.0",
+            "plotly>=5.0"
         ]
     },
     
@@ -149,42 +159,23 @@ setup(
         "Environment :: Console",
     ],
     
-    # Keywords for discoverability
+    # 🔧 FIX: Keywords as proper list of strings
     keywords=[
-        "quantum computing",
-        "molecular simulation", 
-        "neural networks",
-        "hamiltonian estimation",
+        "quantum-computing",
+        "molecular-simulation", 
+        "neural-networks",
+        "hamiltonian-estimation",
         "symqnet",
-        "quantum chemistry",
-        "machine learning",
-        "reinforcement learning"
+        "quantum-chemistry",
+        "machine-learning",
+        "reinforcement-learning"
     ],
     
     # License
     license="MIT",
     
     # Additional metadata
-    zip_safe=False,  # Required for accessing package data
-    
-    # Platform support
+    zip_safe=False,
     platforms=["any"],
-    
-    # Minimum setuptools version
     setup_requires=["setuptools>=45", "wheel"],
 )
-
-# 🔧 FIX: Conditional post-installation message
-if __name__ == "__main__":
-    print("""
-🎉 SymQNet Molecular Optimization CLI installed successfully!
-
-Quick start:
-  1. Validate installation: symqnet-validate
-  2. Create examples: symqnet-examples  
-  3. Test models: symqnet-test
-  4. Run optimization: symqnet-molopt --help
-
-Documentation: https://github.com/YTomar79/symqnet-molopt#readme
-Support: https://github.com/YTomar79/symqnet-molopt/issues
-""")

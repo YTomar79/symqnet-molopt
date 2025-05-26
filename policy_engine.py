@@ -1,6 +1,15 @@
-"""
+# ============================================================================
+# FIX: Update policy_engine.py for PyTorch 2.6
+# ============================================================================
+
+# Let's check the current PyTorch version first
+import torch
+print(f"🔍 PyTorch version: {torch.__version__}")
+
+# Now let's fix the policy_engine.py file
+policy_engine_content = """
 Policy Engine for SymQNet integration using EXACT architectures
-FIXED to handle training architecture mismatch
+FIXED for PyTorch 2.6 weights_only issue
 """
 
 import torch
@@ -32,146 +41,141 @@ class PolicyEngine:
         logger.info("Policy engine initialized successfully")
     
     def _load_models(self):
-        """Load pre-trained VAE and SymQNet models with compatibility handling."""
+        """Load pre-trained VAE and SymQNet models with smart architecture detection."""
         
         # 🔥 Load VAE separately (as it was trained)
         self.vae = VariationalAutoencoder(M=10, L=64).to(self.device)
-        vae_state = torch.load(self.vae_path, map_location=self.device)
+        # 🔧 FIX: Add weights_only=False for PyTorch 2.6
+        vae_state = torch.load(self.vae_path, map_location=self.device, weights_only=False)
         self.vae.load_state_dict(vae_state)
         self.vae.eval()
         for p in self.vae.parameters():
             p.requires_grad = False
         
-        # 🔧 FIXED: Load checkpoint and inspect what's actually saved
-        checkpoint = torch.load(self.model_path, map_location=self.device)
+        # 🔧 FIXED: Inspect checkpoint first to determine architecture  
+        # 🔧 FIX: Add weights_only=False for PyTorch 2.6
+        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
         
-        # Model parameters from YOUR training
+        # Get the actual state dict
+        if 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+        else:
+            state_dict = checkpoint
+        
+        logger.info(f"🔍 Checkpoint contains {len(state_dict)} parameters")
+        logger.info(f"🔍 Keys: {list(state_dict.keys())}")
+        
+        # Model parameters
         n_qubits = 10
         L = 64  # Base latent dimension
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo  # actions
         
-        # Graph connectivity from YOUR training
+        # 🔧 SMART DETECTION: Check if this is a simple estimator-only model
+        is_simple_estimator = (
+            len(state_dict) <= 3 and  # Very few parameters
+            any('estimator' in key for key in state_dict.keys()) and  # Has estimator
+            not any('vae' in key for key in state_dict.keys()) and  # No VAE
+            not any('graph_embed' in key for key in state_dict.keys())  # No graph components
+        )
+        
+        if is_simple_estimator:
+            logger.info("🎯 Detected simple estimator-only model - creating minimal architecture")
+            self._create_minimal_model(state_dict, n_qubits, L, M_evo, A)
+        else:
+            logger.info("🎯 Detected full model - creating complete architecture")
+            self._create_full_model(state_dict, n_qubits, L, T, A, M_evo)
+        
+        self.symqnet.eval()
+        logger.info("✅ Models loaded successfully")
+    
+    def _create_minimal_model(self, state_dict, n_qubits, L, M_evo, A):
+        """Create minimal model for estimator-only checkpoints."""
+        
+        class MinimalSymQNet(nn.Module):
+            def __init__(self, vae, input_dim, output_dim, device):
+                super().__init__()
+                self.vae = vae
+                self.device = device
+                self.estimator = nn.Linear(input_dim, output_dim)
+                self.step_count = 0
+                
+            def forward(self, obs, metadata):
+                # Encode observation
+                with torch.no_grad():
+                    _, _, _, z = self.vae(obs)
+                
+                # Concatenate with metadata
+                combined = torch.cat([z, metadata], dim=-1)
+                
+                # Estimate parameters
+                theta_hat = self.estimator(combined)
+                
+                # Create simple policy outputs (random but valid)
+                action_probs = torch.ones(A, device=self.device) / A  # Uniform distribution
+                dummy_dist = torch.distributions.Categorical(probs=action_probs)
+                dummy_value = torch.tensor(0.0, device=self.device)
+                
+                return dummy_dist, dummy_value, theta_hat
+            
+            def reset_buffer(self):
+                self.step_count = 0
+        
+        # Create minimal model
+        input_dim = L + n_qubits + 3 + M_evo  # z + metadata = 64 + 18 = 82
+        output_dim = 2 * n_qubits - 1  # 19 parameters
+        
+        self.symqnet = MinimalSymQNet(self.vae, input_dim, output_dim, self.device).to(self.device)
+        
+        # Load estimator weights
+        estimator_state = {}
+        for key, value in state_dict.items():
+            if 'estimator' in key:
+                # Handle different possible key formats
+                if key == 'estimator.weight':
+                    estimator_state['weight'] = value
+                elif key == 'estimator.bias':
+                    estimator_state['bias'] = value
+                else:
+                    # Remove 'estimator.' prefix if present
+                    new_key = key.replace('estimator.', '')
+                    estimator_state[new_key] = value
+        
+        # Load the estimator weights
+        self.symqnet.estimator.load_state_dict(estimator_state)
+        logger.info("✅ Loaded minimal estimator model")
+    
+    def _create_full_model(self, state_dict, n_qubits, L, T, A, M_evo):
+        """Create full model for complete checkpoints."""
+        
+        # Graph connectivity
         edges = [(i, i+1) for i in range(n_qubits-1)] + [(i+1, i) for i in range(n_qubits-1)]
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(self.device)
         edge_attr = torch.ones(len(edges), 1, dtype=torch.float32, device=self.device) * 0.1
         
-        # 🔧 FIXED: Handle architecture mismatch
-        try:
-            # First, try to create the full model and load directly
-            self.symqnet = FixedSymQNetWithEstimator(
-                vae=self.vae,
-                n_qubits=n_qubits,
-                L=L,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                T=T,
-                A=A,
-                M_evo=M_evo,
-                K_gnn=2
-            ).to(self.device)
-            
-            # Try loading the checkpoint
-            if 'model_state_dict' in checkpoint:
-                self.symqnet.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            else:
-                self.symqnet.load_state_dict(checkpoint, strict=False)
-                
-            logger.info("✅ Loaded model with full architecture")
-            
-        except Exception as e:
-            logger.warning(f"Full model loading failed: {e}")
-            logger.info("🔄 Trying compatibility mode...")
-            
-            # 🔧 BACKUP: Create a simpler compatible model
-            self._create_compatible_model(checkpoint, n_qubits, L, edge_index, edge_attr, T, A, M_evo)
+        # Create full model
+        self.symqnet = FixedSymQNetWithEstimator(
+            vae=self.vae,
+            n_qubits=n_qubits,
+            L=L,
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            T=T,
+            A=A,
+            M_evo=M_evo,
+            K_gnn=2
+        ).to(self.device)
         
-        self.symqnet.eval()
-        logger.info("Models loaded successfully")
-    
-    def _create_compatible_model(self, checkpoint, n_qubits, L, edge_index, edge_attr, T, A, M_evo):
-        """Create a model compatible with the saved checkpoint."""
+        # Load with strict=False to handle missing keys
+        missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
         
-        # Check what keys are actually in the checkpoint
-        if 'model_state_dict' in checkpoint:
-            state_dict = checkpoint['model_state_dict']
-        else:
-            state_dict = checkpoint
+        if missing_keys:
+            logger.warning(f"Missing {len(missing_keys)} keys (using random init)")
+        if unexpected_keys:
+            logger.warning(f"Ignoring {len(unexpected_keys)} unexpected keys")
         
-        logger.info(f"Available keys in checkpoint: {list(state_dict.keys())}")
-        
-        # If only estimator weights are available, create a minimal model
-        if len(state_dict) <= 2 and any('estimator' in key for key in state_dict.keys()):
-            logger.info("🔧 Creating minimal estimator-only model")
-            
-            class MinimalSymQNet(nn.Module):
-                def __init__(self, vae, input_dim, output_dim):
-                    super().__init__()
-                    self.vae = vae
-                    self.estimator = nn.Linear(input_dim, output_dim)
-                    
-                def forward(self, obs, metadata):
-                    # Encode observation
-                    with torch.no_grad():
-                        _, _, _, z = self.vae(obs)
-                    
-                    # Concatenate with metadata
-                    combined = torch.cat([z, metadata], dim=-1)
-                    
-                    # Estimate parameters
-                    theta_hat = self.estimator(combined)
-                    
-                    # Create dummy policy outputs for compatibility
-                    dummy_logits = torch.zeros(A, device=self.device)
-                    dummy_dist = torch.distributions.Categorical(logits=dummy_logits)
-                    dummy_value = torch.tensor(0.0, device=self.device)
-                    
-                    return dummy_dist, dummy_value, theta_hat
-                
-                def reset_buffer(self):
-                    pass  # No buffer in minimal model
-            
-            # Create minimal model
-            input_dim = L + n_qubits + 3 + M_evo  # z + metadata
-            output_dim = 2 * n_qubits - 1  # 19 parameters
-            
-            self.symqnet = MinimalSymQNet(self.vae, input_dim, output_dim).to(self.device)
-            
-            # Load estimator weights
-            estimator_state = {}
-            for key, value in state_dict.items():
-                if 'estimator' in key:
-                    # Remove 'estimator.' prefix if present
-                    new_key = key.replace('estimator.', '')
-                    estimator_state[new_key] = value
-            
-            self.symqnet.estimator.load_state_dict(estimator_state)
-            logger.info("✅ Loaded minimal estimator model")
-            
-        else:
-            # Try to create full model with relaxed loading
-            self.symqnet = FixedSymQNetWithEstimator(
-                vae=self.vae,
-                n_qubits=n_qubits,
-                L=L,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                T=T,
-                A=A,
-                M_evo=M_evo,
-                K_gnn=2
-            ).to(self.device)
-            
-            # Load with strict=False to ignore missing keys
-            missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
-            
-            if missing_keys:
-                logger.warning(f"Missing keys (will use random initialization): {missing_keys[:5]}...")
-            if unexpected_keys:
-                logger.warning(f"Unexpected keys (ignored): {unexpected_keys[:5]}...")
-            
-            logger.info("✅ Loaded model with partial weights")
+        logger.info("✅ Loaded full model with available weights")
     
     def reset(self):
         """Reset policy state for new rollout."""
@@ -186,21 +190,24 @@ class PolicyEngine:
         """Get next measurement action from policy."""
         
         # Convert measurement to tensor
+        if len(current_measurement) != 10:
+            # Pad or truncate to 10 elements
+            padded_measurement = np.zeros(10)
+            min_len = min(len(current_measurement), 10)
+            padded_measurement[:min_len] = current_measurement[:min_len]
+            current_measurement = padded_measurement
+        
         obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)
         
-        # Create metadata (using YOUR exact format)
+        # Create metadata
         metadata = self._create_metadata()
         
         with torch.no_grad():
             # Get action from policy
             dist, value, theta_estimate = self.symqnet(obs_tensor, metadata)
             
-            # Sample action (handle both real and dummy distributions)
-            try:
-                action_idx = dist.sample().item()
-            except:
-                # Fallback for dummy distributions
-                action_idx = np.random.randint(0, 150)  # A = 150
+            # Sample action
+            action_idx = dist.sample().item()
             
             # Decode action
             action_info = self._decode_action(action_idx)
@@ -213,31 +220,30 @@ class PolicyEngine:
         return action_info
     
     def _create_metadata(self) -> torch.Tensor:
-        """Create metadata tensor using YOUR exact format."""
+        """Create metadata tensor."""
         n_qubits = 10
         M_evo = 5
-        meta_dim = n_qubits + 3 + M_evo  # exactly as in your code
+        meta_dim = n_qubits + 3 + M_evo  # 18
         metadata = torch.zeros(meta_dim, device=self.device)
         
-        # Set some default values based on step (following your training logic)
+        # Set some reasonable defaults based on step
         if self.step_count > 0:
-            # Example: favor Z measurements initially, first time step
-            qi = min(self.step_count % n_qubits, n_qubits - 1)  # cycle through qubits
-            bi = 2  # basis index (Z)
-            ti = min(self.step_count % M_evo, M_evo - 1)  # cycle through times
+            qi = self.step_count % n_qubits  # cycle through qubits
+            bi = 2  # prefer Z measurements
+            ti = self.step_count % M_evo  # cycle through times
             
-            metadata[qi] = 1.0  # qubit index
-            metadata[n_qubits + bi] = 1.0  # basis index
-            metadata[n_qubits + 3 + ti] = 1.0  # time index
+            metadata[qi] = 1.0
+            metadata[n_qubits + bi] = 1.0  
+            metadata[n_qubits + 3 + ti] = 1.0
         
         return metadata
     
     def _decode_action(self, action_idx: int) -> Dict[str, Any]:
-        """Decode integer action using YOUR exact format."""
+        """Decode integer action."""
         M_evo = 5
         
-        # Ensure action_idx is within bounds
-        action_idx = max(0, min(action_idx, 149))  # Clamp to valid range
+        # Ensure valid range
+        action_idx = max(0, min(action_idx, 149))
         
         time_idx = action_idx % M_evo
         action_idx //= M_evo
@@ -245,13 +251,13 @@ class PolicyEngine:
         basis_idx = action_idx % 3
         qubit_idx = action_idx // 3
         
-        # Ensure indices are within bounds
-        qubit_idx = min(qubit_idx, 9)  # Max 9 for 10 qubits
-        basis_idx = min(basis_idx, 2)  # Max 2 for 3 bases
-        time_idx = min(time_idx, M_evo - 1)  # Max M_evo-1
+        # Clamp to valid ranges
+        qubit_idx = min(qubit_idx, 9)
+        basis_idx = min(basis_idx, 2)
+        time_idx = min(time_idx, M_evo - 1)
         
         basis_map = {0: 'X', 1: 'Y', 2: 'Z'}
-        time_map = np.linspace(0.1, 1.0, M_evo)  # matching your SpinChainEnv
+        time_map = np.linspace(0.1, 1.0, M_evo)
         
         return {
             'qubits': [qubit_idx],
@@ -267,7 +273,6 @@ class PolicyEngine:
         if self.parameter_history:
             return self.parameter_history[-1]
         else:
-            # Default for 10-qubit system: 9 coupling + 10 field = 19 parameters
             return np.zeros(19)
     
     def has_converged(self, parameter_estimates: List[np.ndarray]) -> bool:
@@ -275,8 +280,14 @@ class PolicyEngine:
         if len(parameter_estimates) < self.convergence_window:
             return False
         
-        # Check variance in recent estimates
         recent_estimates = np.array(parameter_estimates[-self.convergence_window:])
         variance = np.var(recent_estimates, axis=0)
         
         return np.all(variance < self.convergence_threshold)
+'''
+
+# Write the fixed version
+with open("policy_engine.py", "w") as f:
+    f.write(policy_engine_content)
+
+print("✅ Fixed policy_engine.py for PyTorch 2.6!")

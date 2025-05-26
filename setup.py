@@ -42,31 +42,50 @@ def read_requirements():
 setup(
     name="symqnet-molopt",
     version="1.0.0",
-    author="SymQNet Research Team",
-    author_email="research@symqnet.ai",
+    # 🔧 FIX: Update author info
+    author="YTomar79",
+    author_email="your.email@example.com",  # Update with your email
     description="Molecular Hamiltonian parameter estimation using SymQNet neural networks",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/symqnet/molecular-optimization",
+    # 🔧 FIX: Correct repository URLs
+    url="https://github.com/YTomar79/symqnet-molopt",
     project_urls={
-        "Bug Tracker": "https://github.com/symqnet/molecular-optimization/issues",
-        "Documentation": "https://symqnet.readthedocs.io/",
-        "Source Code": "https://github.com/symqnet/molecular-optimization",
+        "Bug Tracker": "https://github.com/YTomar79/symqnet-molopt/issues",
+        "Documentation": "https://github.com/YTomar79/symqnet-molopt#readme",
+        "Source Code": "https://github.com/YTomar79/symqnet-molopt",
     },
     
-    # Package discovery
-    packages=find_packages(where="."),
-    package_dir={"": "."},
+    # 🔧 FIX: Package discovery for flat structure
+    py_modules=[
+        "cli",
+        "architectures", 
+        "hamiltonian_parser",
+        "measurement_simulator",
+        "policy_engine",
+        "bootstrap_estimator",
+        "utils",
+        "add_hamiltonian"
+    ],
     
-    # Include non-Python files
+    # 🔧 FIX: Include non-Python files correctly
     include_package_data=True,
+    data_files=[
+        ("examples", ["examples/*.json"]) if Path("examples").exists() else ("examples", []),
+        ("models", ["models/*.pth"]) if Path("models").exists() else ("models", []),
+        ("scripts", ["scripts/*.py"]) if Path("scripts").exists() else ("scripts", []),
+    ],
+    
+    # 🔧 FIX: Alternative file inclusion using MANIFEST.in
     package_data={
-        "symqnet_molopt": [
+        "": [  # Root package
             "examples/*.json",
-            "models/*.pth",
+            "models/*.pth", 
             "scripts/*.py",
+            "tests/*.py",
             "*.md",
-            "requirements.txt"
+            "requirements.txt",
+            "LICENSE"
         ],
     },
     
@@ -74,7 +93,7 @@ setup(
     entry_points={
         "console_scripts": [
             "symqnet-molopt=cli:main",
-            "symqnet-add=add_hamiltonian:main",  # 🆕 NEW COMMAND
+            "symqnet-add=add_hamiltonian:main",
             "symqnet-validate=scripts.validate_installation:main",
             "symqnet-test=scripts.test_models:main",
             "symqnet-examples=scripts.create_examples:main",
@@ -100,8 +119,8 @@ setup(
             "myst-parser>=0.17",
         ],
         "gpu": [
-            "torch>=1.12.0+cu116",
-            "torch-geometric>=2.2.0+cu116",
+            "torch>=1.12.0+cu118",  # 🔧 Updated CUDA version
+            "torch-geometric>=2.2.0",
         ],
         "jupyter": [
             "jupyter>=1.0",
@@ -155,8 +174,9 @@ setup(
     setup_requires=["setuptools>=45", "wheel"],
 )
 
-# Post-installation message
-print("""
+# 🔧 FIX: Conditional post-installation message
+if __name__ == "__main__":
+    print("""
 🎉 SymQNet Molecular Optimization CLI installed successfully!
 
 Quick start:
@@ -165,6 +185,6 @@ Quick start:
   3. Test models: symqnet-test
   4. Run optimization: symqnet-molopt --help
 
-Documentation: https://symqnet.readthedocs.io/
-Support: https://github.com/symqnet/molecular-optimization/issues
+Documentation: https://github.com/YTomar79/symqnet-molopt#readme
+Support: https://github.com/YTomar79/symqnet-molopt/issues
 """)

@@ -217,8 +217,7 @@ MIT License - See [LICENSE](LICENSE) file for details.
 **Install once, optimize any molecular system:**
 
 pip install symqnet-molopt
+
 symqnet-molopt --hamiltonian your_molecule.json --output results.json
 
- 
-
-**Experience optimal performance at 10 qubits, reliable results everywhere else.** ⚛️🚀
+ ⚛️🚀

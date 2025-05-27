@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-SymQNet Molecular Optimization CLI - Universal Version with Fallback
+SymQNet Molecular Optimization CLI - CORRECTED UNIVERSAL VERSION
 
-Supports any qubit count with optimal performance at 10 qubits.
-Falls back to 10-qubit-only mode if universal components unavailable.
+Fixed the parameter extraction issue by using proven working rollout logic.
 
 Usage:
     symqnet-molopt --hamiltonian molecule.json --shots 1024 --output results.json
@@ -171,27 +170,111 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
 
 
 def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, shots, n_rollouts, max_steps, warn_performance=True):
-    """Run optimization with universal wrapper if available, otherwise fallback"""
+    """
+    🔧 FIXED: Run optimization with working parameter extraction
+    Uses proven rollout logic for both universal and fallback modes
+    """
+    
+    original_qubits = hamiltonian_data['n_qubits']
     
     if UNIVERSAL_MODE:
-        # Use universal wrapper
-        logger.info("🌍 Using Universal SymQNet wrapper")
+        # 🔧 FIXED: Use working rollout logic with universal normalization
+        logger.info("🌍 Using Universal SymQNet with FIXED parameter extraction")
+        
+        # Step 1: Normalize Hamiltonian for 10-qubit processing
         universal_wrapper = UniversalSymQNetWrapper(
             trained_model_path=model_path,
             trained_vae_path=vae_path,
             device=device
         )
         
-        return universal_wrapper.estimate_parameters(
-            hamiltonian_data=hamiltonian_data,
-            shots=shots,
-            n_rollouts=n_rollouts,
-            max_steps=max_steps,
-            warn_degradation=warn_performance
-        )
+        # Get normalized hamiltonian
+        normalized_hamiltonian = universal_wrapper._normalize_hamiltonian(hamiltonian_data)
+        logger.info(f"🔄 Normalized {original_qubits}-qubit → 10-qubit system")
+        
+        # Step 2: Use the PROVEN WORKING rollout logic on normalized system
+        policy = PolicyEngine(model_path, vae_path, device)
+        simulator = MeasurementSimulator(normalized_hamiltonian, shots, device)
+        estimator = BootstrapEstimator()
+        
+        # Step 3: Run rollouts with the WORKING logic
+        rollout_results = []
+        for i in range(n_rollouts):
+            logger.info(f"🔄 Universal rollout {i+1}/{n_rollouts}")
+            policy.reset()
+            
+            measurements = []
+            parameter_estimates = []
+            current_measurement = simulator.get_initial_measurement()
+            
+            for step in range(max_steps):
+                # 🔧 THIS IS THE WORKING LOGIC FROM FALLBACK MODE
+                action_info = policy.get_action(current_measurement)
+                measurement_result = simulator.execute_measurement(
+                    qubit_indices=action_info['qubits'],
+                    pauli_operators=action_info['operators'],
+                    evolution_time=action_info['time']
+                )
+                
+                measurements.append(measurement_result)
+                
+                # 🔧 CRITICAL: This call actually works!
+                param_estimate = policy.get_parameter_estimate()
+                parameter_estimates.append(param_estimate)
+                
+                current_measurement = measurement_result['expectation_values']
+                
+                # Debug: Check if we're getting real parameters
+                if step == 0:
+                    logger.debug(f"🧪 First parameter estimate: shape={param_estimate.shape}, "
+                                f"range=[{param_estimate.min():.6f}, {param_estimate.max():.6f}]")
+                
+                if step > 5 and policy.has_converged(parameter_estimates):
+                    logger.debug(f"Converged at step {step}")
+                    break
+            
+            # Store rollout results
+            rollout_results.append({
+                'rollout_id': i,
+                'measurements': measurements,
+                'parameter_estimates': parameter_estimates,
+                'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
+                'convergence_step': step
+            })
+            
+            # Debug final estimate
+            if parameter_estimates:
+                final_est = parameter_estimates[-1]
+                logger.debug(f"Rollout {i} final estimate: shape={final_est.shape}, "
+                           f"non-zero: {not np.allclose(final_est, 0)}")
+        
+        # Step 4: Bootstrap analysis on 10-qubit results
+        logger.info("📊 Computing confidence intervals on normalized results...")
+        bootstrap_results = estimator.compute_intervals(rollout_results)
+        
+        # Step 5: Denormalize results back to original system
+        logger.info(f"🔄 Denormalizing results: 10-qubit → {original_qubits}-qubit")
+        normalized_results = {
+            'symqnet_results': bootstrap_results,
+            'rollout_results': rollout_results
+        }
+        
+        final_results = universal_wrapper._denormalize_results(normalized_results, original_qubits)
+        
+        # Add universal metadata
+        final_results['universal_metadata'] = {
+            'original_qubits': original_qubits,
+            'normalized_to': 10,
+            'expected_performance': universal_wrapper._calculate_performance_factor(original_qubits),
+            'normalization_applied': True,
+            'optimal_at': 10,
+            'fixed_parameter_extraction': True
+        }
+        
+        return final_results
     
     else:
-        # Fallback to original implementation
+        # Fallback to original implementation (this already works)
         logger.info("🔧 Using fallback 10-qubit implementation")
         
         # Initialize components directly
@@ -294,7 +377,7 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
     if 'fallback_mode' in results:
         print("🔧 Mode: Fallback (10-qubit only)")
     elif UNIVERSAL_MODE:
-        print("🌍 Mode: Universal")
+        print("🌍 Mode: Universal (FIXED)")
     
     # Extract results from nested structure if needed
     if 'symqnet_results' in results:
@@ -433,10 +516,10 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
          device: str, seed: int, verbose: bool, no_performance_warnings: bool,
          show_performance_analysis: bool):
     """
-    SymQNet Molecular Optimization CLI
+    SymQNet Molecular Optimization CLI - FIXED UNIVERSAL VERSION
     
-    🌍 Universal support (any qubit count) if available
-    🔧 Fallback to 10-qubit-only mode otherwise
+    🌍 Universal support (any qubit count) with WORKING parameter extraction
+    🔧 Fallback to 10-qubit-only mode if universal components unavailable
     
     Examples:
         symqnet-molopt --hamiltonian H2O_10q.json --output results.json
@@ -451,7 +534,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
 
     # Display mode information
     if UNIVERSAL_MODE:
-        logger.info("🌍 Universal SymQNet mode enabled")
+        logger.info("🌍 Universal SymQNet mode enabled (FIXED)")
         logger.info("   Supports any qubit count ≥2 with optimal performance at 10 qubits")
     else:
         logger.info("🔧 Fallback mode active")
@@ -518,11 +601,11 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
         logger.info(f"Loaded {hamiltonian_data['n_qubits']}-qubit Hamiltonian "
                    f"with {len(hamiltonian_data['pauli_terms'])} terms")
         
-        # 2. Run Parameter Estimation (Universal or Fallback)
+        # 2. Run Parameter Estimation (Universal or Fallback) - FIXED VERSION
         performance_report = performance_estimator.estimate_performance(n_qubits)
         logger.info(f"🎯 Expected performance: {performance_report.performance_factor:.1%} of optimal")
         
-        logger.info(f"🚀 Running parameter estimation...")
+        logger.info(f"🚀 Running FIXED parameter estimation...")
         logger.info(f"📊 Configuration: {shots} shots, {n_rollouts} rollouts, {max_steps} max steps")
         
         final_results = run_optimization_universal(
@@ -547,12 +630,13 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
                 'n_rollouts': n_rollouts,
                 'confidence': confidence,
                 'seed': seed,
-                'mode': 'universal' if UNIVERSAL_MODE else 'fallback',
+                'mode': 'universal_fixed' if UNIVERSAL_MODE else 'fallback',
                 'performance_metadata': {
                     'expected_performance': performance_report.performance_factor,
                     'performance_level': performance_report.level.value,
                     'optimal_qubits': 10,
-                    'universal_mode': UNIVERSAL_MODE
+                    'universal_mode': UNIVERSAL_MODE,
+                    'parameter_extraction_fixed': True
                 }
             },
             output_path=output
@@ -570,7 +654,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
                 print(f"\n💡 NOTE: Install universal components to support {n_qubits}-qubit systems.")
                 print(f"   Current fallback mode only supports exactly 10-qubit systems.")
         
-        success_msg = "✅ Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else "✅ Molecular optimization completed successfully!"
+        success_msg = "✅ FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else "✅ Molecular optimization completed successfully!"
         logger.info(success_msg)
         
     except Exception as e:

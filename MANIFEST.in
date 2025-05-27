@@ -1,10 +1,128 @@
+# SymQNet-MolOpt Universal Package Manifest
+# Include all necessary files for universal qubit support
+
+# Core documentation
 include README.md
 include LICENSE
 include requirements.txt
+include CHANGELOG.md
+include MANIFEST.in
+
+# 🌍 UNIVERSAL: Core Python modules
+include symqnet_cli.py
+include universal_wrapper.py
+include performance_estimator.py
+include architectures.py
+include hamiltonian_parser.py
+include measurement_simulator.py
+include policy_engine.py
+include bootstrap_estimator.py
+include utils.py
+include add_hamiltonian.py
+
+# Configuration files
+include setup.py
+include setup.cfg
+include pyproject.toml
+
+# Example molecular systems (various qubit counts)
 recursive-include examples *.json
+recursive-include examples *.md
+recursive-include examples README*
+
+# Trained model files
 recursive-include models *.pth
+recursive-include models *.pt
+recursive-include models *.pkl
+recursive-include models README*
+recursive-include models *.md
+
+# Scripts and utilities
 recursive-include scripts *.py
+recursive-include scripts *.sh
+recursive-include scripts *.md
+
+# Test files
 recursive-include tests *.py
+recursive-include tests *.json
+recursive-include tests README*
+
+# Documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+recursive-include docs *.txt
+recursive-include docs *.png
+recursive-include docs *.jpg
+recursive-include docs Makefile
+recursive-include docs make.bat
+
+# Jupyter notebooks (if any)
+recursive-include notebooks *.ipynb
+recursive-include notebooks *.md
+
+# Data files
+recursive-include data *.json
+recursive-include data *.csv
+recursive-include data *.txt
+
+# GitHub/Development files
+include .gitignore
+include .github/workflows/*.yml
+include .github/workflows/*.yaml
+include .github/ISSUE_TEMPLATE/*.md
+include .github/PULL_REQUEST_TEMPLATE.md
+
+# Package metadata
+include PKG-INFO
+include *.cfg
+include *.ini
+
+# Exclude compiled and cache files
 global-exclude *.pyc
-global-exclude __pycache__
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__/
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+
+# Exclude version control
 global-exclude .git*
+global-exclude .svn*
+global-exclude .hg*
+
+# Exclude IDE files
+global-exclude .vscode/
+global-exclude .idea/
+global-exclude *.swp
+global-exclude *.swo
+global-exclude *~
+
+# Exclude OS files
+global-exclude .DS_Store
+global-exclude Thumbs.db
+global-exclude desktop.ini
+
+# Exclude temporary files
+global-exclude *.tmp
+global-exclude *.temp
+global-exclude *.log
+global-exclude *.bak
+global-exclude *.orig
+
+# Exclude build artifacts
+global-exclude build/
+global-exclude dist/
+global-exclude *.egg-info/
+global-exclude .tox/
+global-exclude .coverage
+global-exclude .pytest_cache/
+
+# Include specific file types we want
+include *.txt
+include *.md
+include *.rst
+include *.yml
+include *.yaml
+include *.json
+include *.toml

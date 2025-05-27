@@ -539,8 +539,8 @@ def get_recommended_params_for_system(n_qubits: int,
               help='Compute device (default: auto)')
 @click.option('--seed', 
               type=int,
-              default=42,
-              help='Random seed for reproducibility (default: 42)')
+              default=None,
+              help='Random seed for reproducibility')
 @click.option('--verbose', '-V',
               is_flag=True,
               help='Enable verbose logging')

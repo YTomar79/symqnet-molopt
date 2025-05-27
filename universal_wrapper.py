@@ -1,5 +1,5 @@
 """
-Universal SymQNet Wrapper - FIXED PARAMETER NAMES
+Universal SymQNet Wrapper - FIXED for MeasurementSimulator compatibility
 Makes 10-qubit trained SymQNet work for any molecular system
 Performance degrades gracefully as you move away from 10 qubits
 """
@@ -46,6 +46,14 @@ class UniversalSymQNetWrapper:
         """Load the original trained 10-qubit model"""
         from policy_engine import PolicyEngine
         return PolicyEngine(model_path, vae_path, self.device)
+    
+    def _pauli_string_to_indices(self, pauli_str: str) -> List[Tuple[int, str]]:
+        """Convert Pauli string like 'XYZI' to [(0,'X'), (1,'Y'), (2,'Z')]."""
+        indices = []
+        for i, pauli in enumerate(pauli_str):
+            if pauli.upper() in ['X', 'Y', 'Z']:
+                indices.append((i, pauli.upper()))
+        return indices
     
     def estimate_parameters(self, 
                           hamiltonian_data: Dict[str, Any],
@@ -148,9 +156,13 @@ class UniversalSymQNetWrapper:
             if len(normalized_string) != self.trained_qubits:
                 raise ValueError(f"Normalization error: normalized string length {len(normalized_string)} != {self.trained_qubits}")
             
+            # 🔧 CRITICAL FIX: Convert pauli_string to pauli_indices for MeasurementSimulator
+            pauli_indices = self._pauli_string_to_indices(normalized_string)
+            
             normalized_terms.append({
                 'coefficient': normalized_coeff,
                 'pauli_string': normalized_string,
+                'pauli_indices': pauli_indices,  # ✅ ADDED: Required by MeasurementSimulator
                 'original_coefficient': coeff,
                 'scale_factor': scale_factor,
                 'description': term.get('description', f'Normalized term {i}')

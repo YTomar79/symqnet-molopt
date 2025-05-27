@@ -97,6 +97,45 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def ensure_model_files(model_path: Optional[Path], vae_path: Optional[Path]) -> Tuple[Path, Path]:
+    """🔧 FIXED: Ensure model files exist, provide helpful error messages if not"""
+    
+    # Default paths
+    default_model_path = Path("models/FINAL_FIXED_SYMQNET.pth")
+    default_vae_path = Path("models/vae_M10_f.pth")
+    
+    # Use provided paths or defaults
+    final_model_path = model_path or default_model_path
+    final_vae_path = vae_path or default_vae_path
+    
+    # Check if files exist and provide helpful error messages
+    if not final_model_path.exists():
+        raise click.ClickException(
+            f"❌ Model file not found: {final_model_path}\n\n"
+            f"💡 SOLUTIONS:\n"
+            f"   1. Create models/ directory in current location\n"
+            f"   2. Download model files from your GitHub repository\n"
+            f"   3. Provide custom path: --model-path /path/to/your/model.pth\n"
+            f"   4. Ensure you're running from the correct directory\n\n"
+            f"🔍 Current working directory: {os.getcwd()}\n"
+            f"📂 Expected model location: {final_model_path.absolute()}"
+        )
+    
+    if not final_vae_path.exists():
+        raise click.ClickException(
+            f"❌ VAE file not found: {final_vae_path}\n\n"
+            f"💡 SOLUTIONS:\n"
+            f"   1. Create models/ directory in current location\n"
+            f"   2. Download VAE files from your GitHub repository\n"
+            f"   3. Provide custom path: --vae-path /path/to/your/vae.pth\n"
+            f"   4. Ensure you're running from the correct directory\n\n"
+            f"🔍 Current working directory: {os.getcwd()}\n"
+            f"📂 Expected VAE location: {final_vae_path.absolute()}"
+        )
+    
+    return final_model_path, final_vae_path
+
+
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
     """Find Hamiltonian file in examples or user directories"""
     
@@ -475,13 +514,13 @@ def get_recommended_params_for_system(n_qubits: int,
               required=True,
               help='Output JSON file for estimates and uncertainties')
 @click.option('--model-path', '-m',
-              type=click.Path(exists=True, path_type=Path),
-              default='models/FINAL_FIXED_SYMQNET.pth',
-              help='Path to trained SymQNet model')
+              type=click.Path(path_type=Path),  # 🔧 FIXED: Removed exists=True
+              default=None,  # 🔧 FIXED: Made optional with None default
+              help='Path to trained SymQNet model (default: models/FINAL_FIXED_SYMQNET.pth)')
 @click.option('--vae-path', '-v',
-              type=click.Path(exists=True, path_type=Path),
-              default='models/vae_M10_f.pth',
-              help='Path to pre-trained VAE')
+              type=click.Path(path_type=Path),  # 🔧 FIXED: Removed exists=True
+              default=None,  # 🔧 FIXED: Made optional with None default
+              help='Path to pre-trained VAE (default: models/vae_M10_f.pth)')
 @click.option('--max-steps', '-t',
               type=int,
               default=50,
@@ -511,8 +550,8 @@ def get_recommended_params_for_system(n_qubits: int,
 @click.option('--show-performance-analysis',
               is_flag=True,
               help='Show detailed performance analysis')
-def main(hamiltonian: Path, shots: int, output: Path, model_path: Path, 
-         vae_path: Path, max_steps: int, n_rollouts: int, confidence: float,
+def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path], 
+         vae_path: Optional[Path], max_steps: int, n_rollouts: int, confidence: float,
          device: str, seed: int, verbose: bool, no_performance_warnings: bool,
          show_performance_analysis: bool):
     """
@@ -539,6 +578,16 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Path,
     else:
         logger.info("🔧 Fallback mode active")
         logger.info("   Supports exactly 10-qubit systems only")
+
+    # 🔧 FIXED: Handle model file paths gracefully
+    try:
+        model_path, vae_path = ensure_model_files(model_path, vae_path)
+        logger.info(f"✅ Using model: {model_path}")
+        logger.info(f"✅ Using VAE: {vae_path}")
+    except click.ClickException:
+        raise  # Re-raise click exceptions as-is
+    except Exception as e:
+        raise click.ClickException(f"❌ Model setup failed: {e}")
 
     # Find hamiltonian file early
     try:

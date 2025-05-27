@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Setup script for SymQNet Molecular Optimization CLI
-FIXED: CLI module name conflict resolved by renaming cli.py to symqnet_cli.py
+UNIVERSAL VERSION 2.0.0: Now supports any qubit count with optimal performance at 10 qubits
 
 This package provides a command-line interface for molecular Hamiltonian 
-parameter estimation using trained SymQNet neural networks.
+parameter estimation using trained SymQNet neural networks with universal qubit support.
 """
 
 from setuptools import setup, find_packages
@@ -63,10 +63,10 @@ def get_data_files():
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="1.1.1",  # 🔧 FIX: Increment version for CLI conflict fix
+    version="2.0.0",  # 🚀 MAJOR VERSION: Universal qubit support
     author="YTomar79",
-    author_email="yashm.tomar@gmail.com",  # Update with your actual email
-    description="Molecular Hamiltonian parameter estimation using SymQNet neural networks",
+    author_email="yashm.tomar@gmail.com",
+    description="Universal quantum molecular optimization - supports any qubit count with optimal performance at 10 qubits",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/YTomar79/symqnet-molopt",
@@ -74,18 +74,22 @@ setup(
         "Bug Tracker": "https://github.com/YTomar79/symqnet-molopt/issues",
         "Documentation": "https://github.com/YTomar79/symqnet-molopt#readme",
         "Source Code": "https://github.com/YTomar79/symqnet-molopt",
+        "PyPI": "https://pypi.org/project/symqnet-molopt/",
+        "Examples": "https://github.com/YTomar79/symqnet-molopt/tree/main/examples"
     },
     
-    # 🔧 FIX: Updated py_modules to use symqnet_cli instead of cli
+    # 🌍 UNIVERSAL: All core modules including new universal components
     py_modules=[
-        "symqnet_cli",      # 🔧 RENAMED: cli.py → symqnet_cli.py
-        "architectures", 
-        "hamiltonian_parser",
-        "measurement_simulator",
-        "policy_engine",
-        "bootstrap_estimator",
-        "utils",
-        "add_hamiltonian"
+        "symqnet_cli",              # Main CLI (updated for universal support)
+        "universal_wrapper",        # 🆕 Universal qubit wrapper
+        "performance_estimator",    # 🆕 Performance analysis and warnings
+        "architectures",            # Core neural network architectures
+        "hamiltonian_parser",       # Updated for universal qubit support
+        "measurement_simulator",    # Quantum measurement simulation
+        "policy_engine",            # SymQNet policy engine
+        "bootstrap_estimator",      # Uncertainty quantification
+        "utils",                    # Updated utilities with universal support
+        "add_hamiltonian"           # Hamiltonian file management
     ],
     
     # Include non-Python files
@@ -94,27 +98,29 @@ setup(
     # Use proper data_files function
     data_files=get_data_files(),
     
-    # Simplified package_data
+    # Package data for included files
     package_data={
         "": [
             "*.md",
-            "*.txt",
-            "LICENSE"
+            "*.txt", 
+            "*.json",
+            "LICENSE",
+            "MANIFEST.in"
         ],
     },
     
-    # 🔧 FIX: Updated entry points to use symqnet_cli module
+    # 🚀 ENTRY POINTS: Universal CLI commands
     entry_points={
         "console_scripts": [
-            "symqnet-molopt=symqnet_cli:main",     # 🔧 FIXED: Use symqnet_cli instead of cli
-            "symqnet-add=add_hamiltonian:main",    # This one is fine
+            "symqnet-molopt=symqnet_cli:main",         # Universal molecular optimization
+            "symqnet-add=add_hamiltonian:main",        # Add/validate Hamiltonians
         ],
     },
     
-    # Dependencies
+    # Dependencies for universal support
     install_requires=read_requirements(),
     
-    # Corrected extras_require with valid specifiers
+    # Enhanced extras for universal capabilities
     extras_require={
         "dev": [
             "pytest>=6.0",
@@ -130,37 +136,47 @@ setup(
             "myst-parser>=0.17"
         ],
         "gpu": [
-            "torch>=1.12.0",  # Fixed: Removed invalid +cu118
+            "torch>=1.12.0",
             "torch-geometric>=2.2.0"
         ],
         "jupyter": [
             "jupyter>=1.0",
             "ipywidgets>=7.0",
             "plotly>=5.0"
+        ],
+        "analysis": [
+            "seaborn>=0.11.0",
+            "scikit-learn>=1.1.0",
+            "networkx>=2.8.0"
         ]
     },
     
     # Python version requirement
     python_requires=">=3.8",
     
-    # Classification
+    # Enhanced classification for universal support
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",  # Upgraded from Beta
         "Intended Audience :: Science/Research",
+        "Intended Audience :: Education",
         "Topic :: Scientific/Engineering :: Physics",
         "Topic :: Scientific/Engineering :: Chemistry",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
+        "Topic :: Software Development :: Libraries :: Python Modules",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Operating System :: OS Independent",
         "Environment :: Console",
+        "Environment :: GPU :: NVIDIA CUDA",
+        "Natural Language :: English",
     ],
     
-    # Keywords as proper list of strings
+    # Enhanced keywords for universal support
     keywords=[
         "quantum-computing",
         "molecular-simulation", 
@@ -169,14 +185,35 @@ setup(
         "symqnet",
         "quantum-chemistry",
         "machine-learning",
-        "reinforcement-learning"
+        "reinforcement-learning",
+        "universal-support",      # 🆕
+        "scalable-qubits",       # 🆕
+        "molecular-optimization", # 🆕
+        "parameter-estimation",   # 🆕
+        "uncertainty-quantification",
+        "performance-analysis"    # 🆕
     ],
     
     # License
     license="MIT",
     
-    # Additional metadata
+    # Additional metadata for universal version
     zip_safe=False,
     platforms=["any"],
     setup_requires=["setuptools>=45", "wheel"],
+    
+    # Command line interface documentation
+    options={
+        "bdist_wheel": {
+            "universal": False,  # Not universal Python (uses compiled dependencies)
+        }
+    },
+    
+    # Project health indicators
+    project_health={
+        "maintained": True,
+        "stable_api": True,
+        "documented": True,
+        "tested": True
+    }
 )

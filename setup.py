@@ -63,7 +63,7 @@ def get_data_files():
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="2.0.11",  # 🚀 MAJOR VERSION: Universal qubit support
+    version="2.1.0",  
     author="YTomar79",
     author_email="yashm.tomar@gmail.com",
     description="Universal quantum molecular optimization - supports any qubit count with optimal performance at 10 qubits",

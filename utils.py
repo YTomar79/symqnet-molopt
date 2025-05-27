@@ -211,7 +211,7 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 'n_rollouts': config.get('n_rollouts', 0),
                 'confidence': float(config.get('confidence', 0.95)),
                 'device': config.get('device', 'cpu'),
-                'seed': config.get('seed', None)
+                'seed': config.get('seed', 42)
             },
             'metadata': {
                 'generated_by': 'Universal SymQNet Molecular Optimization CLI',

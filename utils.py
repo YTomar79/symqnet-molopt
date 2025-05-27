@@ -211,11 +211,11 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 'n_rollouts': config.get('n_rollouts', 0),
                 'confidence': float(config.get('confidence', 0.95)),
                 'device': config.get('device', 'cpu'),
-                'seed': config.get('seed', 42)
+                'seed': config.get('seed', None)
             },
             'metadata': {
                 'generated_by': 'Universal SymQNet Molecular Optimization CLI',
-                'version': '2.0.0',  # Updated for universal support
+                'version': '2.0.12',  # Updated for universal support
                 'model_constraint': f'Trained optimally for {OPTIMAL_QUBITS} qubits, supports any qubit count',
                 'timestamp': datetime.now().isoformat(),
                 'parameter_count': {

@@ -1,6 +1,6 @@
 # SymQNet-MolOpt: Universal Quantum Molecular Optimization
 
-Neural network-guided parameter estimation for molecular Hamiltonians with **universal qubit support**.
+Neural network-guided parameter estimation for molecular Hamiltonians with **universal qubit support**. Bypasses the need for noisy quantum computer and offers a cost--efective way to get hamiltonian paramters on classical hardware.
 
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)

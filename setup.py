@@ -63,10 +63,10 @@ def get_data_files():
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="2.1.1",  
+    version="3.0.0",  
     author="YTomar79",
     author_email="yashm.tomar@gmail.com",
-    description="Universal quantum molecular optimization - supports any qubit count with optimal performance at 10 qubits",
+    description="The universal quantum molecular optimization - supports any qubit count with optimal performance at 10 qubits",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/YTomar79/symqnet-molopt",

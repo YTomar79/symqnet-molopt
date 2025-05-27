@@ -1,6 +1,7 @@
 """
 Utility functions for SymQNet molecular optimization
 ENHANCED FOR UNIVERSAL QUBIT SUPPORT with optimal performance at 10 qubits
+FIXED: Parameter extraction in save_results() function
 """
 
 import json
@@ -86,7 +87,10 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
 
 def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 config: Dict[str, Any], output_path: Path):
-    """Save estimation results to JSON file with universal support."""
+    """
+    🔧 FIXED: Save estimation results to JSON file with universal support.
+    Properly extracts parameters from nested results structure.
+    """
     
     try:
         n_qubits = hamiltonian_data.get('n_qubits', 0)
@@ -94,71 +98,104 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
         # Extract performance metadata if available
         performance_metadata = config.get('performance_metadata', {})
         
-        # Robust parameter processing with error handling
+        # 🔧 CRITICAL FIX: Robust parameter extraction from nested results structure
         coupling_parameters = []
-        if 'coupling_parameters' in results and results['coupling_parameters']:
-            for i, param_data in enumerate(results['coupling_parameters']):
-                try:
-                    if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
-                        mean, ci_low, ci_high = param_data[:3]
-                        coupling_parameters.append({
-                            'index': i,
-                            'mean': float(mean),
-                            'confidence_interval': [float(ci_low), float(ci_high)],
-                            'uncertainty': float(ci_high - ci_low) / 2.0
-                        })
-                    elif isinstance(param_data, dict):
-                        # Handle pre-formatted parameter dictionaries
-                        coupling_parameters.append(param_data)
-                    else:
-                        logger.warning(f"Invalid coupling parameter format at index {i}: {param_data}")
-                except Exception as e:
-                    logger.warning(f"Error processing coupling parameter {i}: {e}")
-        
         field_parameters = []
-        if 'field_parameters' in results and results['field_parameters']:
-            for i, param_data in enumerate(results['field_parameters']):
-                try:
-                    if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
-                        mean, ci_low, ci_high = param_data[:3]
-                        field_parameters.append({
-                            'index': i,
-                            'mean': float(mean),
-                            'confidence_interval': [float(ci_low), float(ci_high)],
-                            'uncertainty': float(ci_high - ci_low) / 2.0
-                        })
-                    elif isinstance(param_data, dict):
-                        # Handle pre-formatted parameter dictionaries
-                        field_parameters.append(param_data)
-                    else:
-                        logger.warning(f"Invalid field parameter format at index {i}: {param_data}")
-                except Exception as e:
-                    logger.warning(f"Error processing field parameter {i}: {e}")
         
-        # Handle both original results and universal wrapper results
+        # Handle nested results structure - extract symqnet_results first
         if 'symqnet_results' in results:
-            # Universal wrapper results - extract nested data
             symqnet_data = results['symqnet_results']
-            total_uncertainty = symqnet_data.get('total_uncertainty', 0.0)
-            avg_measurements = symqnet_data.get('avg_measurements_used', 0.0)
-            confidence_level = symqnet_data.get('confidence_level', 0.95)
-            n_rollouts = symqnet_data.get('n_rollouts', 0)
+            logger.debug(f"🔍 Found symqnet_results in results")
         else:
-            # Direct results
-            total_uncertainty = results.get('total_uncertainty', 0.0)
-            avg_measurements = results.get('avg_measurements', 0.0)
-            confidence_level = results.get('confidence_level', 0.95)
-            n_rollouts = results.get('n_rollouts', 0)
+            symqnet_data = results
+            logger.debug(f"🔍 Using results directly as symqnet_data")
         
-        # Build output data with universal metadata
+        logger.debug(f"🔍 symqnet_data keys: {list(symqnet_data.keys())}")
+        
+        # 🔧 FIXED: Extract coupling parameters with detailed debugging
+        if 'coupling_parameters' in symqnet_data:
+            raw_coupling = symqnet_data['coupling_parameters']
+            logger.debug(f"🔍 Raw coupling parameters: type={type(raw_coupling)}, length={len(raw_coupling) if hasattr(raw_coupling, '__len__') else 'N/A'}")
+            
+            if raw_coupling:  # Not empty
+                logger.debug(f"🔍 First coupling parameter: {raw_coupling[0] if raw_coupling else 'None'}")
+                
+                for i, param_data in enumerate(raw_coupling):
+                    try:
+                        if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
+                            # Tuple format: (mean, ci_low, ci_high)
+                            mean, ci_low, ci_high = param_data[0], param_data[1], param_data[2]
+                            coupling_parameters.append({
+                                'index': i,
+                                'mean': float(mean),
+                                'confidence_interval': [float(ci_low), float(ci_high)],
+                                'uncertainty': float(ci_high - ci_low) / 2.0
+                            })
+                            logger.debug(f"✅ Processed coupling parameter {i}: {mean:.6f}")
+                        elif isinstance(param_data, dict):
+                            # Dict format - already properly formatted
+                            coupling_parameters.append(param_data)
+                            logger.debug(f"✅ Added coupling parameter dict {i}")
+                        else:
+                            logger.warning(f"Unexpected coupling parameter format at index {i}: {type(param_data)} = {param_data}")
+                    except Exception as e:
+                        logger.error(f"Error processing coupling parameter {i}: {e}")
+            else:
+                logger.warning("⚠️ coupling_parameters is empty or None")
+        else:
+            logger.warning("⚠️ No 'coupling_parameters' key found in symqnet_data")
+        
+        # 🔧 FIXED: Extract field parameters with detailed debugging
+        if 'field_parameters' in symqnet_data:
+            raw_field = symqnet_data['field_parameters']
+            logger.debug(f"🔍 Raw field parameters: type={type(raw_field)}, length={len(raw_field) if hasattr(raw_field, '__len__') else 'N/A'}")
+            
+            if raw_field:  # Not empty
+                logger.debug(f"🔍 First field parameter: {raw_field[0] if raw_field else 'None'}")
+                
+                for i, param_data in enumerate(raw_field):
+                    try:
+                        if isinstance(param_data, (tuple, list)) and len(param_data) >= 3:
+                            # Tuple format: (mean, ci_low, ci_high)
+                            mean, ci_low, ci_high = param_data[0], param_data[1], param_data[2]
+                            field_parameters.append({
+                                'index': i,
+                                'mean': float(mean),
+                                'confidence_interval': [float(ci_low), float(ci_high)],
+                                'uncertainty': float(ci_high - ci_low) / 2.0
+                            })
+                            logger.debug(f"✅ Processed field parameter {i}: {mean:.6f}")
+                        elif isinstance(param_data, dict):
+                            # Dict format - already properly formatted
+                            field_parameters.append(param_data)
+                            logger.debug(f"✅ Added field parameter dict {i}")
+                        else:
+                            logger.warning(f"Unexpected field parameter format at index {i}: {type(param_data)} = {param_data}")
+                    except Exception as e:
+                        logger.error(f"Error processing field parameter {i}: {e}")
+            else:
+                logger.warning("⚠️ field_parameters is empty or None")
+        else:
+            logger.warning("⚠️ No 'field_parameters' key found in symqnet_data")
+        
+        # 🔧 CRITICAL: Log what we extracted for debugging
+        logger.info(f"✅ Extracted {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters for saving")
+        
+        # Extract other symqnet_results data with safe defaults
+        total_uncertainty = float(symqnet_data.get('total_uncertainty', 0.0))
+        avg_measurements = float(symqnet_data.get('avg_measurements_used', symqnet_data.get('avg_measurements', 0.0)))
+        confidence_level = float(symqnet_data.get('confidence_level', 0.95))
+        n_rollouts = int(symqnet_data.get('n_rollouts', 0))
+        
+        # Build output data with correctly extracted parameters
         output_data = {
             'symqnet_results': {
-                'coupling_parameters': coupling_parameters,
-                'field_parameters': field_parameters,
-                'total_uncertainty': float(total_uncertainty),
-                'avg_measurements_used': float(avg_measurements),
-                'confidence_level': float(confidence_level),
-                'n_rollouts': int(n_rollouts)
+                'coupling_parameters': coupling_parameters,  # ✅ FIXED
+                'field_parameters': field_parameters,        # ✅ FIXED
+                'total_uncertainty': total_uncertainty,
+                'avg_measurements_used': avg_measurements,
+                'confidence_level': confidence_level,
+                'n_rollouts': n_rollouts
             },
             'hamiltonian_info': {
                 'molecule': hamiltonian_data.get('molecule', 'unknown'),
@@ -185,7 +222,8 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                     'coupling': len(coupling_parameters),
                     'field': len(field_parameters),
                     'total': len(coupling_parameters) + len(field_parameters)
-                }
+                },
+                'parameter_extraction_fixed': True  # ✅ Mark as fixed
             }
         }
         
@@ -225,7 +263,7 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
             
             file_size = output_path.stat().st_size
             logger.info(f"✅ Results saved to {output_path} ({file_size} bytes)")
-            logger.info(f"📊 Saved {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters")
+            logger.info(f"📊 Saved {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters")  # ✅ FIXED
             
         except PermissionError:
             logger.error(f"Permission denied writing to: {output_path}")

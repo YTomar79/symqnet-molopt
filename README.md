@@ -1,20 +1,20 @@
-# SymQNet-MolOpt: Universal Quantum Molecular Optimization
+# WaveForge (SymQNet-MolOpt): Quantum Molecular Optimization
 
-Neural network-guided parameter estimation for molecular Hamiltonians with **universal qubit support**. Bypasses the need for noisy quantum computers and offers a cost-effective way to get Hamiltonian parameters on classical hardware.
+Neural network-guided parameter estimation for molecular Hamiltonians with **universal qubit support**. Is much more scalable, sample efficient, and accurate in molecular optimization.
 
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Universal Support](https://img.shields.io/badge/qubits-2%2B%20supported-green.svg)](https://github.com/YTomar79/symqnet-molopt)
+[![Universal Support](https://img.shields.io/badge/qubits-2%2B%20supported-green.svg)](https://github.com/YTomar79/WaveForge)
 
 ## 🚀 Installation
 
-pip install symqnet-molopt
+pip install SymQNet-MolOpt
 
  
 
 ## 🌍 Universal Qubit Support
 
-**SymQNet-MolOpt now supports any molecular system** with intelligent performance scaling:
+**WaveForge now supports any molecular system** with intelligent performance scaling:
 
 | Qubit Count | Use Case |
 |-------------|----------|
@@ -28,14 +28,14 @@ pip install symqnet-molopt
 
 ### Quick Start
 Works with any molecular system!
-symqnet-molopt --hamiltonian your_molecule.json --output results.json
+SymQNet-MolOpt --hamiltonian your_molecule.json --output results.json
 
  
 
 ### 🧪 Example Systems
 
 #### Small Molecule (4 qubits)
-symqnet-molopt
+SymQNet-MolOpt
 --hamiltonian examples/H2_4q.json
 --output h2_results.json
 --shots 1024
@@ -43,7 +43,7 @@ symqnet-molopt
  
 
 #### Medium Molecule (10 qubits)
-symqnet-molopt
+SymQNet-MolOpt
 --hamiltonian examples/H2O_10q.json
 --output h2o_results.json
 --shots 1024
@@ -53,7 +53,7 @@ symqnet-molopt
  
 
 #### Large Molecule (15 qubits)
-symqnet-molopt
+SymQNet-MolOpt
 --hamiltonian examples/large_mol_15q.json
 --output large_results.json
 --shots 2048
@@ -72,7 +72,7 @@ symqnet-add my_molecule.json --validate-only
 
 ### 📊 Performance Analysis
 Get detailed performance analysis
-symqnet-molopt
+SymQNet-MolOpt
 --hamiltonian molecule.json
 --output results.json
 --show-performance-analysis
@@ -84,7 +84,7 @@ symqnet-molopt
 ### Core Commands
 | Command | Description | Qubit Support |
 |---------|-------------|---------------|
-| `symqnet-molopt` | Run molecular parameter optimization | **Any count ≥2** |
+| `SymQNet-MolOpt` | Run molecular parameter optimization | **Any count ≥2** |
 | `symqnet-add` | Add or validate a Hamiltonian file | **Universal** |
 | `symqnet-examples` | Generate example Hamiltonians | **Multiple sizes** |
 | `symqnet-validate` | Validate installation | **System check** |
@@ -103,16 +103,16 @@ symqnet-molopt
 ## 🎯 Performance Optimization
 
 ### Automatic Parameter Scaling
-SymQNet automatically adjusts parameters based on your system size:
+WaveForge automatically adjusts parameters based on your system size:
 
 4-qubit system: CLI automatically increases shots/rollouts
-symqnet-molopt --hamiltonian small_mol_4q.json --output results.json
+SymQNet-MolOpt --hamiltonian small_mol_4q.json --output results.json
 
 10-qubit system: Optimal parameters used
-symqnet-molopt --hamiltonian optimal_mol_10q.json --output results.json
+SymQNet-MolOpt --hamiltonian optimal_mol_10q.json --output results.json
 
 16-qubit system: CLI recommends higher accuracy settings
-symqnet-molopt --hamiltonian large_mol_16q.json --output results.json
+SymQNet-MolOpt --hamiltonian large_mol_16q.json --output results.json
 
  
 
@@ -170,13 +170,13 @@ Validate any system
 symqnet-add examples/molecule_8q.json --validate-only
 
 Quick test (any qubit count)
-symqnet-molopt --hamiltonian examples/test.json --output output.json --shots 512
+SymQNet-MolOpt --hamiltonian examples/test.json --output output.json --shots 512
 
 High accuracy run (auto-optimized parameters)
-symqnet-molopt --hamiltonian molecule.json --output results.json --shots 2048 --n-rollouts 10
+SymQNet-MolOpt --hamiltonian molecule.json --output results.json --shots 2048 --n-rollouts 10
 
 Batch processing (no warnings)
-symqnet-molopt --hamiltonian large_system.json --output results.json --no-performance-warnings
+SymQNet-MolOpt --hamiltonian large_system.json --output results.json --no-performance-warnings
 
  
 
@@ -202,7 +202,7 @@ symqnet-molopt --hamiltonian large_system.json --output results.json --no-perfor
 
 ## 🆘 Support
 
-- **Issues:** [GitHub Issues](https://github.com/YTomar79/symqnet-molopt/issues)
+- **Issues:** [GitHub Issues](https://github.com/YTomar79/WaveForge/issues)
 - **Help:** Run any command with `--help` for usage info
 - **Performance Questions:** Use `--show-performance-analysis` for system-specific guidance
 
@@ -216,8 +216,8 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 **Install once, optimize any molecular system:**
 
-pip install symqnet-molopt
+pip install SymQNet-MolOpt
 
-symqnet-molopt --hamiltonian your_molecule.json --output results.json
+SymQNet-MolOpt --hamiltonian your_molecule.json --output results.json
 
  ⚛️🚀

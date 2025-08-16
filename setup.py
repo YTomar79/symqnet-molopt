@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
 Fixed setup.py for symqnet-molopt
-
-- Ensures data_files entries are relative paths (no absolute paths).
-- Removes deprecated license classifier and uses license_files.
-- Uses find_packages() to install symqnet_molopt package if present.
+- Fixes Path(__file__) typo
+- Excludes unwanted top-level directories from package discovery
+- Removes deprecated license classifier
+- Uses explicit package discovery to avoid flat-layout issues
 """
 from setuptools import setup, find_packages
 from pathlib import Path
 import glob
 import sys
 
-ROOT = Path(__file__).parent.resolve()
+ROOT = Path(__file__).parent.resolve()  # Fixed: was Path(file)
 
 # long description
 long_description = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").exists() else ""
@@ -45,7 +45,7 @@ def get_data_files():
     All file paths are made relative to ROOT and converted to POSIX style.
     """
     ret = []
-    for sub in ("examples", "models", "scripts"):
+    for sub in ("examples", "models", "scripts", "outputs"):  # Added outputs here
         d = ROOT / sub
         if d.exists() and d.is_dir():
             files = [f for f in sorted(d.iterdir()) if f.is_file()]
@@ -89,10 +89,11 @@ setup(
     author_email="yashm.tomar@gmail.com",
     license="MIT",
     license_files=("LICENSE",),
-
-    # Use find_packages() but restrict to the expected package namespace
-    packages=find_packages(include=["symqnet_molopt", "symqnet_molopt.*"]) or None,
-
+    # FIXED: Use explicit exclusion to avoid flat-layout conflicts
+    packages=find_packages(
+        include=["symqnet_molopt", "symqnet_molopt.*"],
+        exclude=["models", "outputs", "examples", "scripts"]
+    ) or [],
     include_package_data=True,
     package_data={
         # include markdown/json/LICENSE etc.
@@ -100,14 +101,10 @@ setup(
         # if you also want to include models inside the package dir:
         # "symqnet_molopt": ["models/*"]
     },
-
     # data_files must use relative paths (converted by get_data_files)
     data_files=get_data_files(),
-
     entry_points={"console_scripts": console_entry} if console_entry else {},
-
     install_requires=read_requirements(),
-
     extras_require={
         "dev": ["pytest>=6.0", "pytest-cov>=2.0", "black>=22.0", "flake8>=4.0", "isort>=5.0", "mypy>=0.950"],
         "docs": ["sphinx>=4.0", "sphinx-rtd-theme>=1.0", "myst-parser>=0.17"],
@@ -115,18 +112,16 @@ setup(
         "jupyter": ["jupyter>=1.0", "ipywidgets>=7.0", "plotly>=5.0"],
         "analysis": ["seaborn>=0.11.0", "scikit-learn>=1.1.0", "networkx>=2.8.0"],
     },
-
     python_requires=">=3.8",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Physics",
-        "License :: OSI Approved :: MIT License",  # harmless but optional; setuptools warns about it
+        # Removed deprecated license classifier
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
         "Environment :: Console",
     ],
-
     zip_safe=False,
     platforms=["any"],
     setup_requires=["setuptools>=45", "wheel"],

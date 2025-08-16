@@ -13,8 +13,28 @@ import sys
 
 ROOT = Path(__file__).parent.resolve()  # Fixed: was Path(file)
 
+
+
 # long description
 long_description = (ROOT / "README.md").read_text(encoding="utf-8") if (ROOT / "README.md").exists() else ""
+
+py_modules = [
+    "symqnet_cli",          # CLI entry point   (symqnet-molopt)
+    "add_hamiltonian",      # secondary CLI     (symqnet-add)
+    "architectures",
+    "bootstrap_estimator",
+    "hamiltonian_parser",
+    "measurement_simulator",
+    "performance_estimator",
+    "policy_engine",
+    "universal_wrapper",
+    "utils",
+]
+
+console_scripts = [
+    "symqnet-molopt=symqnet_cli:main",
+    "symqnet-add=add_hamiltonian:main",
+]
 
 def read_requirements():
     req_file = ROOT / "requirements.txt"
@@ -80,7 +100,7 @@ else:
 # Package metadata
 setup(
     name="symqnet-molopt",
-    version="3.0.3",
+    version="3.0.4",
     description="The universal quantum molecular optimization - supports any qubit count with optimal performance at 10 qubits",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -90,20 +110,17 @@ setup(
     license="MIT",
     license_files=("LICENSE",),
     # FIXED: Use explicit exclusion to avoid flat-layout conflicts
-    packages=find_packages(
-        include=["symqnet_molopt", "symqnet_molopt.*"],
-        exclude=["models", "outputs", "examples", "scripts"]
-    ) or [],
+    py_modules=py_modules,
+    entry_points={"console_scripts": console_scripts},
+
     include_package_data=True,
     package_data={
         # include markdown/json/LICENSE etc.
         "": ["*.md", "*.txt", "*.json", "LICENSE", "MANIFEST.in"],
-        # if you also want to include models inside the package dir:
-        # "symqnet_molopt": ["models/*"]
+
     },
     # data_files must use relative paths (converted by get_data_files)
     data_files=get_data_files(),
-    entry_points={"console_scripts": console_entry} if console_entry else {},
     install_requires=read_requirements(),
     extras_require={
         "dev": ["pytest>=6.0", "pytest-cov>=2.0", "black>=22.0", "flake8>=4.0", "isort>=5.0", "mypy>=0.950"],

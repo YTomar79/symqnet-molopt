@@ -101,60 +101,72 @@ def ensure_model_files(model_path: Optional[Path],
                        vae_path: Optional[Path],
                        auto_symlink: bool = True) -> Tuple[Path, Path]:
     """
-    Resolve FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth regardless of CWD.
-    Search order:
-      1) user-provided paths
-      2) wheel-bundled models/ next to installed symqnet_cli.py
-      3) ./models relative to current working dir
+    Resolve FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth with auto-download fallback.
     """
     MODEL_FILE = "FINAL_FIXED_SYMQNET.pth"
-    VAE_FILE   = "vae_M10_f.pth"
+    VAE_FILE = "vae_M10_f.pth"
+    
+    # GitHub URLs for auto-download
+    MODEL_URL = "https://github.com/YTomar79/symqnet-molopt/raw/main/models/FINAL_FIXED_SYMQNET.pth"
+    VAE_URL = "https://github.com/YTomar79/symqnet-molopt/raw/main/models/vae_M10_f.pth"
 
-    def _resolve(user: Optional[Path], bundled_dir: Path, rel_default: Path) -> Path:
+    def _download_file(url: str, filepath: Path) -> Path:
+        """Download file if missing."""
+        if filepath.exists():
+            return filepath
+            
+        print(f"⬇️ Downloading {filepath.name}...")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, filepath)
+            print(f"✅ Downloaded {filepath.name}")
+            return filepath
+        except Exception as e:
+            raise click.ClickException(f"Failed to download {filepath.name}: {e}")
+
+    def _resolve(user: Optional[Path], bundled_dir: Path, rel_default: Path, url: str) -> Path:
+        # 1. User-provided path
         if user is not None:
             up = Path(user).expanduser().resolve()
             if up.exists():
                 return up
             raise click.ClickException(f"❌ File not found: {up}")
-        # wheel-bundled
-        bp = bundled_dir / (MODEL_FILE if rel_default.name == MODEL_FILE else VAE_FILE)
+        
+        # 2. Wheel-bundled (next to this module)
+        filename = MODEL_FILE if "SYMQNET" in url else VAE_FILE
+        bp = bundled_dir / filename
         if bp.exists():
             return bp
-        # ./models fallback
+            
+        # 3. Local ./models/
         if rel_default.exists():
             return rel_default
-        raise FileNotFoundError
+            
+        # 4. Auto-download as last resort
+        return _download_file(url, rel_default)
 
-    # wheel-bundled models live next to this module in site-packages
+    # Find wheel-bundled models directory
     try:
-        import symqnet_cli
-        pkg_dir = Path(symqnet_cli.__file__).parent
+        # Fixed: Use __file__ instead of **file**
+        pkg_dir = Path(__file__).parent
         bundled_models = pkg_dir / "models"
-    except ImportError:
-        # If we can't import ourselves (shouldn't happen), fall back to cwd only
+    except:
         bundled_models = Path("nonexistent")
 
+    # Local fallback paths
     cwd_models = Path.cwd() / "models"
-    rel_model  = cwd_models / MODEL_FILE
-    rel_vae    = cwd_models / VAE_FILE
+    rel_model = cwd_models / MODEL_FILE
+    rel_vae = cwd_models / VAE_FILE
 
     try:
-        final_model = _resolve(model_path, bundled_models, rel_model)
-        final_vae   = _resolve(vae_path,   bundled_models, rel_vae)
-    except FileNotFoundError:
-        raise click.ClickException(
-            "❌ Model or VAE file not found.\n"
-            "Install the wheel that bundles weights or pass --model-path and --vae-path."
-        )
+        final_model = _resolve(model_path, bundled_models, rel_model, MODEL_URL)
+        final_vae = _resolve(vae_path, bundled_models, rel_vae, VAE_URL)
+        return final_model, final_vae
+    except Exception as e:
+        raise click.ClickException(f"❌ Model resolution failed: {e}")
 
-    # optional convenience: create ./models symlink
-    if auto_symlink and bundled_models.exists() and not cwd_models.exists():
-        try:
-            cwd_models.symlink_to(bundled_models)
-        except Exception:
-            pass
-
-    return final_model, final_vae
 
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
     """Find Hamiltonian file in examples or user directories"""

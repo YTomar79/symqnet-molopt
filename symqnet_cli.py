@@ -100,6 +100,7 @@ logger = logging.getLogger(__name__)
 import symqnet_cli
 import os, shutil
 from pathlib import Path
+import importlib.resources as ilr
 
 # find the 'models' folder next to the installed symqnet_cli module
 pkg_dir = Path(symqnet_cli.__file__).parent

@@ -96,44 +96,94 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- make wheel-bundled weights visible -----------------------
+import importlib.resources as ilr, shutil, os
+with ilr.path("symqnet_molopt.models", "FINAL_FIXED_SYMQNET.pth") as p:
+    os.environ.setdefault("SYMQNET_MODEL_PATH", str(p.parent))   # optional
+    if not Path("models").is_dir():            # create cwd/models symlink
+        (Path.cwd() / "models").symlink_to(p.parent)
+# --------------------------------------------------------------
 
-def ensure_model_files(model_path: Optional[Path], vae_path: Optional[Path]) -> Tuple[Path, Path]:
-    """🔧 FIXED: Ensure model files exist, provide helpful error messages if not"""
-    
-    # Default paths
-    default_model_path = Path("models/FINAL_FIXED_SYMQNET.pth")
-    default_vae_path = Path("models/vae_M10_f.pth")
-    
-    # Use provided paths or defaults
-    final_model_path = model_path or default_model_path
-    final_vae_path = vae_path or default_vae_path
-    
-    # Check if files exist and provide helpful error messages
-    if not final_model_path.exists():
+# ─────────────────────────────────────────────────────────────────────────────
+#  Helper: locate model & VAE weights no matter where the CLI is launched
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def ensure_model_files(model_path: Path | None,
+                       vae_path:   Path | None,
+                       auto_symlink: bool = True) -> tuple[Path, Path]:
+    """
+    Resolve the paths to FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth.
+
+    1. If the user passed a path, use it (and verify it exists).
+    2. Otherwise look inside the installed wheel (symqnet_molopt.models).
+    3. Otherwise look for ./models/… relative to *current* working dir.
+    4. If nothing is found, raise ClickException with helpful message.
+    """
+
+    # names of the weight files
+    MODEL_FILE = "FINAL_FIXED_SYMQNET.pth"
+    VAE_FILE   = "vae_M10_f.pth"
+
+    # ------------------------------------------------------------------
+    # Helper: resolve a single file
+    # ------------------------------------------------------------------
+    def _resolve(user_path: Path | None, packaged_res, rel_default: Path) -> Path:
+        # 1. user-supplied path
+        if user_path is not None:
+            upath = Path(user_path).expanduser().resolve()
+            if upath.exists():
+                return upath
+            raise click.ClickException(f"❌ File not found: {upath}")
+
+        # 2. packaged inside wheel?
+        try:
+            with ilr.as_file(packaged_res) as p:
+                if p.exists():
+                    return p
+        except FileNotFoundError:
+            pass  # not packaged
+
+        # 3. ./models/… relative to CWD
+        if rel_default.exists():
+            return rel_default
+
+        # 4. fail
+        raise FileNotFoundError
+
+    # packaged resources
+    pkg_root = ilr.files("symqnet_molopt.models")
+    packaged_model = pkg_root / MODEL_FILE
+    packaged_vae   = pkg_root / VAE_FILE
+
+    # relative defaults (old behaviour)
+    cwd_models = Path.cwd() / "models"
+    rel_model  = cwd_models / MODEL_FILE
+    rel_vae    = cwd_models / VAE_FILE
+
+    # Try to resolve both files
+    try:
+        final_model = _resolve(model_path, packaged_model, rel_model)
+        final_vae   = _resolve(vae_path,   packaged_vae,   rel_vae)
+    except FileNotFoundError:
         raise click.ClickException(
-            f"❌ Model file not found: {final_model_path}\n\n"
-            f"💡 SOLUTIONS:\n"
-            f"   1. Create models/ directory in current location\n"
-            f"   2. Download model files from your GitHub repository\n"
-            f"   3. Provide custom path: --model-path /path/to/your/model.pth\n"
-            f"   4. Ensure you're running from the correct directory\n\n"
-            f"🔍 Current working directory: {os.getcwd()}\n"
-            f"📂 Expected model location: {final_model_path.absolute()}"
+            "❌ Model or VAE file not found.\n"
+            "Either install the wheel that bundles the weights or pass "
+            "--model-path and --vae-path explicitly."
         )
-    
-    if not final_vae_path.exists():
-        raise click.ClickException(
-            f"❌ VAE file not found: {final_vae_path}\n\n"
-            f"💡 SOLUTIONS:\n"
-            f"   1. Create models/ directory in current location\n"
-            f"   2. Download VAE files from your GitHub repository\n"
-            f"   3. Provide custom path: --vae-path /path/to/your/vae.pth\n"
-            f"   4. Ensure you're running from the correct directory\n\n"
-            f"🔍 Current working directory: {os.getcwd()}\n"
-            f"📂 Expected VAE location: {final_vae_path.absolute()}"
-        )
-    
-    return final_model_path, final_vae_path
+
+    # ------------------------------------------------------------------
+    # Optional quality-of-life: create ./models symlink ➜ packaged path
+    # so *future* relative checks succeed regardless of CWD.
+    # ------------------------------------------------------------------
+    if auto_symlink and not cwd_models.exists():
+        try:
+            cwd_models.symlink_to(pkg_root)  # one shot; ignored if already exists
+        except Exception:
+            pass  # ignore problems on FAT/Windows etc.
+
+    return final_model, final_vae
+
 
 
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
@@ -695,13 +745,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         print_summary(final_results, n_qubits, performance_report.performance_factor)
         
         # Final performance note
-        if n_qubits != 10:
-            if UNIVERSAL_MODE:
-                print(f"\n💡 NOTE: For optimal accuracy, consider using 10-qubit molecular representations.")
-                print(f"   Current system ({n_qubits} qubits) operates at {performance_report.performance_factor:.1%} of optimal performance.")
-            else:
-                print(f"\n💡 NOTE: Install universal components to support {n_qubits}-qubit systems.")
-                print(f"   Current fallback mode only supports exactly 10-qubit systems.")
+
         
         success_msg = "✅ FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else "✅ Molecular optimization completed successfully!"
         logger.info(success_msg)

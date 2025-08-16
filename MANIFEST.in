@@ -36,6 +36,7 @@ recursive-include models *.pt
 recursive-include models *.pkl
 recursive-include models README*
 recursive-include models *.md
+recursive-include symqnet_molopt/models *.pth
 
 # Scripts and utilities
 recursive-include scripts *.py

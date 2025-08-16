@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from torch.distributions import Categorical, Normal
 from collections import deque
-import gym
+import gymnasium as gym
 from gym import spaces
 import random
 

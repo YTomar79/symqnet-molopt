@@ -94,7 +94,7 @@ long_description = README.read_text(encoding="utf-8") if README.exists() else ""
 
 setup(
     name="symqnet-molopt",
-    version="3.0.12",
+    version="3.0.14",
     description="Universal SymQNet Molecular Optimisation (supports any qubit count)",
     long_description=long_description,
     long_description_content_type="text/markdown",

@@ -97,11 +97,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- make wheel-bundled weights visible -----------------------
-import importlib.resources as ilr, shutil, os
-with ilr.path("symqnet_molopt.models", "FINAL_FIXED_SYMQNET.pth") as p:
-    os.environ.setdefault("SYMQNET_MODEL_PATH", str(p.parent))   # optional
-    if not Path("models").is_dir():            # create cwd/models symlink
-        (Path.cwd() / "models").symlink_to(p.parent)
+import symqnet_cli
+import os, shutil
+from pathlib import Path
+
+# find the 'models' folder next to the installed symqnet_cli module
+pkg_dir = Path(symqnet_cli.__file__).parent
+wheel_models = pkg_dir / "models"
+
+if wheel_models.is_dir():
+    
+    # point SYMQNET_MODEL_PATH at the wheel’s models directory
+    os.environ.setdefault("SYMQNET_MODEL_PATH", str(wheel_models))
+    
+    # create a local 'models' symlink so old relative checks still work
+    local_models = Path.cwd() / "models"
+    if not local_models.exists():
+        try:
+            local_models.symlink_to(wheel_models)
+        except FileExistsError:
+            pass
+else:
+    # fall back to existing behavior (e.g. repo root models/)
+    pass
 # --------------------------------------------------------------
 
 # ─────────────────────────────────────────────────────────────────────────────

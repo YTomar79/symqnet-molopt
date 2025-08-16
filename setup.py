@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup.py for SymQNet-MolOpt (v3.0.5)
+setup.py for SymQNet-MolOpt (v3.0.6)
 
 Key fixes
 ──────────
@@ -116,7 +116,7 @@ long_description = README.read_text(encoding="utf-8") if README.exists() else ""
 # ──────────────────────────────────────────────────────────────────────────────
 setup(
     name="symqnet-molopt",
-    version="3.0.5",
+    version="3.0.6",
     description="Universal SymQNet Molecular Optimisation (supports any qubit count)",
     long_description=long_description,
     long_description_content_type="text/markdown",

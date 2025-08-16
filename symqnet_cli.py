@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
 SymQNet Molecular Optimization CLI - CORRECTED UNIVERSAL VERSION
-
 Fixed the parameter extraction issue by using proven working rollout logic.
-
 Usage:
     symqnet-molopt --hamiltonian molecule.json --shots 1024 --output results.json
 """
-
 import click
 import json
 import torch
@@ -39,7 +36,7 @@ try:
     logger.info("🌍 Universal mode available")
 except ImportError as e:
     logger = logging.getLogger(__name__)
-    logger.warning(f"⚠️  Universal components not available: {e}")
+    logger.warning(f"⚠️ Universal components not available: {e}")
     logger.warning("🔧 Falling back to 10-qubit-only mode")
     
     # Fallback implementations
@@ -89,121 +86,75 @@ try:
         SpinChainEnv
     )
 except ImportError as e:
-    logger.warning(f"⚠️  Architecture imports failed: {e}")
+    logger.warning(f"⚠️ Architecture imports failed: {e}")
     # Continue anyway - let it fail later with clearer error
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- make wheel-bundled weights visible -----------------------
-import symqnet_cli
-import os, shutil
-from pathlib import Path
-import importlib.resources as ilr
-
-# find the 'models' folder next to the installed symqnet_cli module
-pkg_dir = Path(symqnet_cli.__file__).parent
-wheel_models = pkg_dir / "models"
-
-if wheel_models.is_dir():
-    
-    # point SYMQNET_MODEL_PATH at the wheel’s models directory
-    os.environ.setdefault("SYMQNET_MODEL_PATH", str(wheel_models))
-    
-    # create a local 'models' symlink so old relative checks still work
-    local_models = Path.cwd() / "models"
-    if not local_models.exists():
-        try:
-            local_models.symlink_to(wheel_models)
-        except FileExistsError:
-            pass
-else:
-    # fall back to existing behavior (e.g. repo root models/)
-    pass
-# --------------------------------------------------------------
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  Helper: locate model & VAE weights no matter where the CLI is launched
 # ─────────────────────────────────────────────────────────────────────────────
 
-
-def ensure_model_files(model_path: Path | None,
-                       vae_path:   Path | None,
-                       auto_symlink: bool = True) -> tuple[Path, Path]:
+def ensure_model_files(model_path: Optional[Path],
+                       vae_path: Optional[Path],
+                       auto_symlink: bool = True) -> Tuple[Path, Path]:
     """
-    Resolve the paths to FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth.
-
-    1. If the user passed a path, use it (and verify it exists).
-    2. Otherwise look inside the installed wheel (symqnet_molopt.models).
-    3. Otherwise look for ./models/… relative to *current* working dir.
-    4. If nothing is found, raise ClickException with helpful message.
+    Resolve FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth regardless of CWD.
+    Search order:
+      1) user-provided paths
+      2) wheel-bundled models/ next to installed symqnet_cli.py
+      3) ./models relative to current working dir
     """
-
-    # names of the weight files
     MODEL_FILE = "FINAL_FIXED_SYMQNET.pth"
     VAE_FILE   = "vae_M10_f.pth"
 
-    # ------------------------------------------------------------------
-    # Helper: resolve a single file
-    # ------------------------------------------------------------------
-    def _resolve(user_path: Path | None, packaged_res, rel_default: Path) -> Path:
-        # 1. user-supplied path
-        if user_path is not None:
-            upath = Path(user_path).expanduser().resolve()
-            if upath.exists():
-                return upath
-            raise click.ClickException(f"❌ File not found: {upath}")
-
-        # 2. packaged inside wheel?
-        try:
-            with ilr.as_file(packaged_res) as p:
-                if p.exists():
-                    return p
-        except FileNotFoundError:
-            pass  # not packaged
-
-        # 3. ./models/… relative to CWD
+    def _resolve(user: Optional[Path], bundled_dir: Path, rel_default: Path) -> Path:
+        if user is not None:
+            up = Path(user).expanduser().resolve()
+            if up.exists():
+                return up
+            raise click.ClickException(f"❌ File not found: {up}")
+        # wheel-bundled
+        bp = bundled_dir / (MODEL_FILE if rel_default.name == MODEL_FILE else VAE_FILE)
+        if bp.exists():
+            return bp
+        # ./models fallback
         if rel_default.exists():
             return rel_default
-
-        # 4. fail
         raise FileNotFoundError
 
-    # packaged resources
-    pkg_root = ilr.files("symqnet_molopt.models")
-    packaged_model = pkg_root / MODEL_FILE
-    packaged_vae   = pkg_root / VAE_FILE
+    # wheel-bundled models live next to this module in site-packages
+    try:
+        import symqnet_cli
+        pkg_dir = Path(symqnet_cli.__file__).parent
+        bundled_models = pkg_dir / "models"
+    except ImportError:
+        # If we can't import ourselves (shouldn't happen), fall back to cwd only
+        bundled_models = Path("nonexistent")
 
-    # relative defaults (old behaviour)
     cwd_models = Path.cwd() / "models"
     rel_model  = cwd_models / MODEL_FILE
     rel_vae    = cwd_models / VAE_FILE
 
-    # Try to resolve both files
     try:
-        final_model = _resolve(model_path, packaged_model, rel_model)
-        final_vae   = _resolve(vae_path,   packaged_vae,   rel_vae)
+        final_model = _resolve(model_path, bundled_models, rel_model)
+        final_vae   = _resolve(vae_path,   bundled_models, rel_vae)
     except FileNotFoundError:
         raise click.ClickException(
             "❌ Model or VAE file not found.\n"
-            "Either install the wheel that bundles the weights or pass "
-            "--model-path and --vae-path explicitly."
+            "Install the wheel that bundles weights or pass --model-path and --vae-path."
         )
 
-    # ------------------------------------------------------------------
-    # Optional quality-of-life: create ./models symlink ➜ packaged path
-    # so *future* relative checks succeed regardless of CWD.
-    # ------------------------------------------------------------------
-    if auto_symlink and not cwd_models.exists():
+    # optional convenience: create ./models symlink
+    if auto_symlink and bundled_models.exists() and not cwd_models.exists():
         try:
-            cwd_models.symlink_to(pkg_root)  # one shot; ignored if already exists
+            cwd_models.symlink_to(bundled_models)
         except Exception:
-            pass  # ignore problems on FAT/Windows etc.
+            pass
 
     return final_model, final_vae
-
-
 
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
     """Find Hamiltonian file in examples or user directories"""
@@ -233,7 +184,6 @@ def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
         f"  • examples/\n\n"
         f"Use 'symqnet-add {hamiltonian_path}' to add your file to the system."
     )
-
 
 def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
     """Validate Hamiltonian with universal support or fallback"""
@@ -275,7 +225,6 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
         raise ValueError(f"Invalid JSON file: {hamiltonian_path}")
     except FileNotFoundError:
         raise ValueError(f"Hamiltonian file not found: {hamiltonian_path}")
-
 
 def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, shots, n_rollouts, max_steps, warn_performance=True):
     """
@@ -432,7 +381,6 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
             'fallback_mode': True
         }
 
-
 def print_performance_info(n_qubits: int, performance_estimator: PerformanceEstimator):
     """Print performance information and recommendations"""
     
@@ -450,7 +398,7 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
     
     if UNIVERSAL_MODE:
         print(f"📈 Expected Performance: {report.performance_factor:.1%} of optimal")
-        print(f"🏷️  Performance Level: {report.level.value.upper()}")
+        print(f"🏷️ Performance Level: {report.level.value.upper()}")
         
         if n_qubits == performance_estimator.optimal_qubits:
             print("\n✨ Running at optimal performance!")
@@ -463,14 +411,13 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
             print("✨ Running in supported mode!")
         else:
             print("📈 Expected Performance: Not supported in fallback mode")
-            print("⚠️  Only 10-qubit systems supported")
+            print("⚠️ Only 10-qubit systems supported")
     
     # Show recommendations
     if report.recommendations:
         print(f"\n💡 RECOMMENDATIONS:")
         for i, rec in enumerate(report.recommendations[:3], 1):
             print(f"   {i}. {rec}")
-
 
 def print_summary(results: Dict, n_qubits: int, performance_factor: float):
     """Print a formatted summary of results with performance context."""
@@ -499,14 +446,14 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
             if isinstance(coupling_params[0], tuple):
                 # Tuple format: (mean, ci_low, ci_high)
                 coupling_count = len(coupling_params)
-                print(f"\n⚛️  COUPLING PARAMETERS ({coupling_count} estimated):")
+                print(f"\n⚛️ COUPLING PARAMETERS ({coupling_count} estimated):")
                 for i, (mean, ci_low, ci_high) in enumerate(coupling_params):
                     uncertainty = (ci_high - ci_low) / 2
                     print(f"  J_{i}: {mean:8.6f} ± {uncertainty:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
             else:
                 # Dict format
                 coupling_count = len(coupling_params)
-                print(f"\n⚛️  COUPLING PARAMETERS ({coupling_count} estimated):")
+                print(f"\n⚛️ COUPLING PARAMETERS ({coupling_count} estimated):")
                 for param in coupling_params:
                     i = param.get('index', 0)
                     mean = param.get('mean', 0)
@@ -543,7 +490,6 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
     
     print("="*60)
 
-
 def get_recommended_params_for_system(n_qubits: int, 
                                      user_shots: int, 
                                      user_rollouts: int,
@@ -568,7 +514,6 @@ def get_recommended_params_for_system(n_qubits: int,
         'recommended_rollouts': recommended['n_rollouts']
     }
 
-
 @click.command()
 @click.option('--hamiltonian', '-h', 
               type=click.Path(path_type=Path),
@@ -583,12 +528,12 @@ def get_recommended_params_for_system(n_qubits: int,
               required=True,
               help='Output JSON file for estimates and uncertainties')
 @click.option('--model-path', '-m',
-              type=click.Path(path_type=Path),  # 🔧 FIXED: Removed exists=True
-              default=None,  # 🔧 FIXED: Made optional with None default
+              type=click.Path(path_type=Path),
+              default=None,
               help='Path to trained SymQNet model (default: models/FINAL_FIXED_SYMQNET.pth)')
 @click.option('--vae-path', '-v',
-              type=click.Path(path_type=Path),  # 🔧 FIXED: Removed exists=True
-              default=None,  # 🔧 FIXED: Made optional with None default
+              type=click.Path(path_type=Path),
+              default=None,
               help='Path to pre-trained VAE (default: models/vae_M10_f.pth)')
 @click.option('--max-steps', '-t',
               type=int,
@@ -639,7 +584,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         logging.getLogger().setLevel(logging.DEBUG)
     
     setup_logging(verbose)
-
+    
     # Display mode information
     if UNIVERSAL_MODE:
         logger.info("🌍 Universal SymQNet mode enabled (FIXED)")
@@ -647,7 +592,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     else:
         logger.info("🔧 Fallback mode active")
         logger.info("   Supports exactly 10-qubit systems only")
-
+    
     # 🔧 FIXED: Handle model file paths gracefully
     try:
         model_path, vae_path = ensure_model_files(model_path, vae_path)
@@ -657,7 +602,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         raise  # Re-raise click exceptions as-is
     except Exception as e:
         raise click.ClickException(f"❌ Model setup failed: {e}")
-
+    
     # Find hamiltonian file early
     try:
         hamiltonian_path = find_hamiltonian_file(hamiltonian)
@@ -764,8 +709,6 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         print_summary(final_results, n_qubits, performance_report.performance_factor)
         
         # Final performance note
-
-        
         success_msg = "✅ FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else "✅ Molecular optimization completed successfully!"
         logger.info(success_msg)
         
@@ -775,7 +718,6 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
             import traceback
             traceback.print_exc()
         raise click.ClickException(str(e))
-
 
 if __name__ == '__main__':
     main()

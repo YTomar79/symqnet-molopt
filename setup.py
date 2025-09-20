@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup.py for SymQNet-MolOpt (v3.0.11) - FIXED MODEL SHIPPING
+setup.py for SymQNet-MolOpt (v3.0.20) - FIXED MODEL SHIPPING
 """
 from pathlib import Path
 from setuptools import setup, find_packages
@@ -94,8 +94,8 @@ long_description = README.read_text(encoding="utf-8") if README.exists() else ""
 
 setup(
     name="symqnet-molopt",
-    version="3.0.16",
-    description="Universal SymQNet Molecular Optimisation (supports any qubit count)",
+    version="3.0.20",
+    description="SymQNet Molecular Optimization via Hamiltonian Estimation",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="YTomar79",
@@ -104,7 +104,7 @@ setup(
     license="MIT",
     python_requires=">=3.8",
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Physics", 
         "License :: OSI Approved :: MIT License",

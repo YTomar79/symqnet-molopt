@@ -1,11 +1,11 @@
 # SymQNet-MolOpt: Hamiltonian Parameter Estimation
 
-SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for molecular and spin-system models.
+SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for spin-system models and ultimately much more efficient molecular optimization.
 It is designed for sample-efficient optimization and reports confidence intervals for each parameter.
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ```bash
 pip install SymQNet-MolOpt
@@ -13,7 +13,7 @@ pip install SymQNet-MolOpt
 
 ---
 
-## 📚 Usage
+## Usage
 
 ### Core Command
 
@@ -31,13 +31,7 @@ SymQNet-MolOpt --hamiltonian input.json --output results.json
 
 ---
 
-## 🤬 Examples
-
-**Small Molecule (H₂, 4 qubits)**
-
-```bash
-SymQNet-MolOpt --hamiltonian examples/H2_4q.json --output h2_results.json --shots 1024
-```
+## Examples
 
 **Water Molecule (H₂O, 10 qubits)**
 
@@ -50,10 +44,11 @@ SymQNet-MolOpt --hamiltonian examples/H2O_10q.json --output h2o_results.json --s
 ```bash
 SymQNet-MolOpt --hamiltonian examples/ising_12q.json --output ising_results.json --shots 1024
 ```
+(You need to create your own JSON Hamiltonian.)
 
 ---
 
-## 📁 Input Format
+## Input Format
 
 Hamiltonians are specified in JSON:
 
@@ -71,7 +66,7 @@ Hamiltonians are specified in JSON:
 
 ---
 
-## 📊 Output Format
+## Output Format
 
 Results include estimated parameters with uncertainties:
 
@@ -98,16 +93,10 @@ Results include estimated parameters with uncertainties:
 
 ---
 
-## 🔧 Requirements
+## Requirements
 
 * Python 3.8+
 * PyTorch 1.12+
 * NumPy, SciPy, Click
 
----
 
-## 🎯 Summary
-
-* Works with molecules, Ising, and Heisenberg systems.
-* Estimates Hamiltonian parameters efficiently.
-* Reports 95% confidence intervals for uncertainty quantification.

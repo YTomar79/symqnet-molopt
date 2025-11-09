@@ -665,8 +665,8 @@ class HamiltonianParser:
             ("C2H4", 16, "complex")
         ]
         
-        print(f"🌍 Creating universal SymQNet examples in {output_dir}/")
-        print("=" * 60)
+        print(f" Creating universal SymQNet examples in {output_dir}/")
+
         
         for molecule, n_qubits, complexity in examples:
             try:
@@ -686,9 +686,9 @@ class HamiltonianParser:
             except Exception as e:
                 print(f"❌ Failed to create {molecule}_{n_qubits}q: {e}")
         
-        print("=" * 60)
-        print(f"📚 Universal examples created - test with:")
-        print(f"   symqnet-molopt --hamiltonian examples/H2O_10q.json --output results.json  ⭐")
+
+        print(f"Examples created - test with:")
+        print(f"   symqnet-molopt --hamiltonian examples/H2O_10q.json --output results.json ")
         print(f"   symqnet-molopt --hamiltonian examples/NH3_12q.json --output results.json")
 
 

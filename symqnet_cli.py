@@ -400,7 +400,7 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
         print(" UNIVERSAL SYMQNET PERFORMANCE ANALYSIS")
     else:
         print(" FALLBACK MODE ANALYSIS")
-    print("="*60)
+
     
     report = performance_estimator.estimate_performance(n_qubits)
     
@@ -472,7 +472,6 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
     if 'n_rollouts' in symqnet_results:
         print(f"🔄 Rollouts Completed: {symqnet_results['n_rollouts']}")
     
-    print("="*60)
 
 def get_recommended_params_for_system(n_qubits: int, 
                                      user_shots: int, 

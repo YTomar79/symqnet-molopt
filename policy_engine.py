@@ -1,5 +1,5 @@
 """
-Policy Engine for SymQNet integration - CRITICALLY FIXED
+Policy Engine for SymQNet integration 
 Fixed tensor shapes, error checking, and parameter extraction
 """
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import logging
 
-# 🔥 IMPORT YOUR EXACT ARCHITECTURES 🔥
+
 from architectures import (
     VariationalAutoencoder, 
     GraphEmbed,
@@ -40,7 +40,6 @@ class PolicyEngine:
     def _load_models(self):
         """Load pre-trained VAE and SymQNet models with EXACT architecture matching."""
         
-        # 🔥 Load VAE exactly as trained
         self.vae = VariationalAutoencoder(M=10, L=64).to(self.device)
         vae_state = torch.load(self.vae_path, map_location=self.device, weights_only=False)
         self.vae.load_state_dict(vae_state)
@@ -48,7 +47,7 @@ class PolicyEngine:
         for p in self.vae.parameters():
             p.requires_grad = False
         
-        # 🔧 FIXED: Inspect checkpoint to determine EXACT architecture
+        # FIXED: Inspect checkpoint to determine EXACT architecture
         checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
         
         # Get the actual state dict
@@ -60,13 +59,12 @@ class PolicyEngine:
         logger.info(f"🔍 Checkpoint contains {len(state_dict)} parameters")
         logger.info(f"🔍 Keys: {list(state_dict.keys())[:10]}...")
         
-        # 🔧 TRAINING PARAMETERS
+        #  PARAMETERS
         n_qubits = 10
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo  # 150 actions
         
-        # 🔧 ARCHITECTURE DETECTION
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
         if is_simple_estimator:
@@ -77,7 +75,7 @@ class PolicyEngine:
             self._create_full_model(state_dict, n_qubits, T, A, M_evo)
         
         self.symqnet.eval()
-        logger.info("✅ Models loaded with EXACT architecture match")
+        logger.info(" Models loaded with EXACT architecture match")
     
     def _detect_simple_estimator(self, state_dict):
         """Detect if this is a simple estimator or full model."""
@@ -87,11 +85,11 @@ class PolicyEngine:
         has_policy = any('policy_value' in key for key in state_dict.keys())
         estimator_keys = [key for key in state_dict.keys() if 'estimator' in key]
         
-        logger.info(f"🔍 Architecture detection:")
-        logger.info(f"   Graph embed: {has_graph_embed}")
-        logger.info(f"   Temporal agg: {has_temp_agg}")
-        logger.info(f"   Policy head: {has_policy}")
-        logger.info(f"   Estimator keys: {len(estimator_keys)}")
+        logger.info(f"Architecture detection:")
+        logger.info(f" Graph embed: {has_graph_embed}")
+        logger.info(f" Temporal agg: {has_temp_agg}")
+        logger.info(f" Policy head: {has_policy}")
+        logger.info(f" Estimator keys: {len(estimator_keys)}")
         
         is_simple = (
             not has_graph_embed and
@@ -133,7 +131,6 @@ class PolicyEngine:
                 self.step_count = 0
                 
             def forward(self, obs, metadata):
-                # 🔧 CRITICAL FIX: Ensure batch dimension
                 if obs.dim() == 1:
                     obs = obs.unsqueeze(0)  # [10] -> [1, 10]
                 if metadata.dim() == 1:
@@ -150,7 +147,7 @@ class PolicyEngine:
                 # Estimate parameters
                 theta_hat = self.estimator(z_with_meta)  # [1, 19]
                 
-                # 🔧 CRITICAL FIX: Remove batch dimension for output
+
                 theta_hat = theta_hat.squeeze(0)  # [1, 19] -> [19]
                 
                 # Create dummy policy outputs
@@ -185,17 +182,16 @@ class PolicyEngine:
         
         try:
             self.symqnet.estimator.load_state_dict(estimator_state, strict=True)
-            logger.info("✅ Estimator weights loaded successfully")
+            logger.info(" Estimator weights loaded successfully")
             
-            # 🔧 DEBUG: Test the estimator
             test_input = torch.randn(1, 82, device=self.device)
             with torch.no_grad():
                 test_output = self.symqnet.estimator(test_input)
-                logger.info(f"🧪 Estimator test output shape: {test_output.shape}")
-                logger.info(f"🧪 Estimator test output range: [{test_output.min():.4f}, {test_output.max():.4f}]")
+                logger.info(f" Estimator test output shape: {test_output.shape}")
+                logger.info(f" Estimator test output range: [{test_output.min():.4f}, {test_output.max():.4f}]")
             
         except Exception as e:
-            logger.warning(f"⚠️ Estimator loading issue: {e}")
+            logger.warning(f" Estimator loading issue: {e}")
             self.symqnet.estimator.load_state_dict(estimator_state, strict=False)
     
     def _create_full_model(self, state_dict, n_qubits, T, A, M_evo):
@@ -206,11 +202,10 @@ class PolicyEngine:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous().to(self.device)
         edge_attr = torch.ones(len(edges), 1, dtype=torch.float32, device=self.device) * 0.1
         
-        # 🔧 THE FIX: Use the L value that produces the checkpoint dimensions
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=64,  # ✅ BASE VAE dimension, internal arch adds 18 to make 82
+            L=64,  # BASE VAE dimension, internal arch adds 18 to make 82
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -228,10 +223,10 @@ class PolicyEngine:
             if unexpected_keys:
                 logger.warning(f"Unexpected {len(unexpected_keys)} keys: {unexpected_keys[:5]}...")
             
-            logger.info("✅ Full model loaded with correct dimensions")
+            logger.info("Full model loaded with correct dimensions")
             
         except Exception as e:
-            logger.error(f"❌ Full model loading failed: {e}")
+            logger.error(f" Full model loading failed: {e}")
             raise
     
     def reset(self):
@@ -243,45 +238,42 @@ class PolicyEngine:
         self.convergence_threshold = 1e-4
         self.convergence_window = 5
         
-        logger.debug("🔄 Policy engine state reset")
+        logger.debug(" Policy engine state reset")
     
     def get_action(self, current_measurement: np.ndarray) -> Dict[str, Any]:
         """Get next measurement action from policy with EXACT metadata."""
         
-        # 🔧 CRITICAL FIX: Ensure correct input shape
         if len(current_measurement) != 10:
             padded_measurement = np.zeros(10)
             min_len = min(len(current_measurement), 10)
             padded_measurement[:min_len] = current_measurement[:min_len]
             current_measurement = padded_measurement
         
-        # 🔧 CRITICAL FIX: Proper tensor conversion with batch dimension
         obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)  # [10]
         metadata = self._create_metadata()  # [18]
         
-        logger.debug(f"🔍 Input shapes: obs={obs_tensor.shape}, metadata={metadata.shape}")
+        logger.debug(f" Input shapes: obs={obs_tensor.shape}, metadata={metadata.shape}")
         
         try:
             with torch.no_grad():
                 dist, value, theta_estimate = self.symqnet(obs_tensor, metadata)
                 
-                # 🔧 CRITICAL FIX: Validate theta_estimate
+
                 if theta_estimate is None:
-                    logger.error("❌ theta_estimate is None!")
+                    logger.error(" theta_estimate is None!")
                     theta_estimate = torch.zeros(19, device=self.device)
                 
                 if theta_estimate.numel() == 0:
-                    logger.error("❌ theta_estimate is empty!")
+                    logger.error(" theta_estimate is empty!")
                     theta_estimate = torch.zeros(19, device=self.device)
                 
                 # Convert to numpy and validate
                 theta_np = theta_estimate.cpu().numpy()
                 
                 if theta_np.shape[0] != 19:
-                    logger.error(f"❌ Wrong parameter count: {theta_np.shape[0]} != 19")
+                    logger.error(f" Wrong parameter count: {theta_np.shape[0]} != 19")
                     theta_np = np.zeros(19)
                 
-                # 🔧 CRITICAL FIX: Check if parameters are actually non-zero
                 if np.allclose(theta_np, 0, atol=1e-10):
                     logger.warning(f"⚠️ All parameters are zero at step {self.step_count}")
                 else:

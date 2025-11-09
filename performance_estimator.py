@@ -362,15 +362,15 @@ class PerformanceEstimator:
         
         report = self.estimate_performance(n_qubits)
         
-        print(f"\n🔍 PERFORMANCE ANALYSIS: {n_qubits}-QUBIT SYSTEM")
-        print("=" * 60)
-        print(f"📊 Performance Factor: {report.performance_factor:.1%}")
-        print(f"🎯 Performance Level: {report.level.value.upper()}")
-        print(f"📈 Uncertainty Scaling: {report.uncertainty_scaling:.1f}x")
-        print(f"⚡ Computational Overhead: {report.computational_overhead:.1f}x")
+        print(f"\n PERFORMANCE ANALYSIS: {n_qubits}-QUBIT SYSTEM")
+
+        print(f" Performance Factor: {report.performance_factor:.1%}")
+        print(f" Performance Level: {report.level.value.upper()}")
+        print(f" Uncertainty Scaling: {report.uncertainty_scaling:.1f}x")
+        print(f"Computational Overhead: {report.computational_overhead:.1f}x")
         
         if report.warning_message:
-            print(f"\n⚠️  WARNING: {report.warning_message}")
+            print(f"\nWARNING: {report.warning_message}")
         
         if report.recommendations:
             print(f"\n💡 RECOMMENDATIONS:")
@@ -388,10 +388,10 @@ class PerformanceEstimator:
         
         min_qubits, max_qubits = qubit_range
         
-        print(f"\n📊 PERFORMANCE BENCHMARK TABLE")
-        print("=" * 70)
+        print(f"\n PERFORMANCE BENCHMARK TABLE")
+
         print(f"{'Qubits':<8} {'Performance':<12} {'Level':<12} {'Uncertainty':<12} {'Overhead':<10}")
-        print("-" * 70)
+
         
         for n_qubits in range(min_qubits, max_qubits + 1):
             report = self.estimate_performance(n_qubits, include_recommendations=False)
@@ -402,7 +402,7 @@ class PerformanceEstimator:
                   f"{level_short:<12} {report.uncertainty_scaling:<12.1f}x "
                   f"{report.computational_overhead:<10.1f}x")
         
-        print("-" * 70)
+
         print(f"Optimal performance at {self.optimal_qubits} qubits")
 
 

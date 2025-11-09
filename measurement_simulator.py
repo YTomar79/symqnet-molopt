@@ -1,6 +1,5 @@
 """
 Measurement Simulator for symbolic quantum measurements
-FULLY FIXED VERSION with joint measurements and proper validation
 """
 
 import torch
@@ -22,14 +21,12 @@ class MeasurementSimulator:
         self.noise_prob = noise_prob
         self.n_qubits = hamiltonian_data['n_qubits']
         
-        # 🔧 FIX: Validate 10-qubit constraint
         if self.n_qubits != 10:
             raise ValueError(
                 f"MeasurementSimulator only supports 10-qubit systems. "
                 f"Got {self.n_qubits} qubits."
             )
         
-        # 🔧 FIX: Check for large system memory usage
         dim = 2 ** self.n_qubits
         memory_mb = (dim * dim * 16) / (1024 * 1024)  # Complex128 = 16 bytes
         if memory_mb > 100:  # Warn for >100MB
@@ -41,7 +38,7 @@ class MeasurementSimulator:
         # Build full Hamiltonian matrix
         self.hamiltonian_matrix = self._build_hamiltonian_matrix()
         
-        # 🔧 FIX: Match policy_engine.py time range
+        # fix was to match policy_engine.py time range
         self.evolution_times = np.linspace(0.1, 1.0, 10)  # Was 0.1 to 2.0
         
         # Precompute evolution operators
@@ -105,7 +102,7 @@ class MeasurementSimulator:
     
     def get_initial_measurement(self) -> np.ndarray:
         """Get initial measurement (ground state)."""
-        # Start with ground state |000...0>
+        # Start with ground state |000...........0>
         psi0 = np.zeros(2 ** self.n_qubits, dtype=complex)
         psi0[0] = 1.0
         

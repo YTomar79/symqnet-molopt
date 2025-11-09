@@ -2,8 +2,8 @@
 """
 Test model loading with exact architectures
 
-This script specifically tests that your trained models can be loaded
-correctly with your exact architectures from the attached source code.
+This script specifically tests that  trained models can be loaded
+correctly with  exact architectures from the attached source code.
 """
 
 import sys
@@ -18,9 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def print_test_header(title):
     """Print formatted test header"""
-    print(f"\n{'='*60}")
-    print(f"🧪 {title}")
-    print(f"{'='*60}")
+    print(f" {title}")
 
 def print_test_result(test_name, success, details=""):
     """Print test result"""
@@ -30,7 +28,7 @@ def print_test_result(test_name, success, details=""):
         print(f"    └─ {details}")
 
 def test_architecture_imports():
-    """Test importing all architectures from your exact code"""
+    """Test importing all architectures from  exact code"""
     print_test_header("Architecture Import Tests")
     
     try:
@@ -102,7 +100,7 @@ def test_graph_embed():
     try:
         from architectures import GraphEmbed
         
-        # Parameters matching your training
+        # Parameters matching  training
         n_qubits = 10
         L = 64
         K = 2
@@ -225,7 +223,7 @@ def test_complete_symqnet():
         for p in vae.parameters():
             p.requires_grad = False
         
-        # SymQNet parameters matching your training
+        # SymQNet parameters matching  training
         n_qubits = 10
         L = 64  
         T = 10
@@ -283,7 +281,7 @@ def test_complete_symqnet():
         return False
 
 def test_model_loading():
-    """Test loading your actual trained models"""
+    """Test loading  actual trained models"""
     print_test_header("Trained Model Loading Tests")
     
     device = torch.device('cpu')
@@ -326,7 +324,7 @@ def test_model_loading():
         checkpoint = torch.load('models/FINAL_FIXED_SYMQNET.pth', map_location=device)
         print_test_result("SymQNet checkpoint load", True, f"Keys: {list(checkpoint.keys())}")
         
-        # Model parameters from your exact training
+        # Model parameters from  exact training
         n_qubits = 10
         L = 64
         T = 10
@@ -420,7 +418,7 @@ def test_environment():
 
 def main():
     """Run all model tests"""
-    print("🔬 SYMQNET MODEL TESTING SUITE")
+
     print(f"Testing from: {Path.cwd()}")
     print(f"Python version: {sys.version}")
     print(f"PyTorch version: {torch.__version__}")
@@ -439,7 +437,7 @@ def main():
     
     results = {}
     for test_name, test_func in tests:
-        print(f"\n⏳ Running {test_name}...")
+        print(f"\n Running {test_name}...")
         try:
             results[test_name] = test_func()
         except Exception as e:
@@ -448,36 +446,32 @@ def main():
             results[test_name] = False
     
     # Summary
-    print_test_header("Test Summary")
+    print_test_header("summary")
     
     passed = sum(results.values())
     total = len(results)
     
     for test_name, result in results.items():
-        status = "✅ PASS" if result else "❌ FAIL"  
+        status = " PASS" if result else " FAIL"  
         print(f"{test_name:<25} | {status}")
     
-    print(f"\n📊 OVERALL RESULT: {passed}/{total} tests passed")
+    print(f"\n OVERALL RESULT: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 ALL MODEL TESTS PASSED!")
-        print("Your architectures and trained models are working correctly.")
-        print("\n💡 Next steps:")
-        print("   • Run: python scripts/validate_installation.py")
-        print("   • Try the CLI: python cli.py --help")
+
+        print("The architectures and trained models are working correctly.")
+
+
     else:
-        print("⚠️  Some tests failed. Please check the errors above.")
+        print("  Some tests failed. Please check the errors above.")
         
         if not results.get("Architecture Imports", True):
-            print("\n🔧 Fix architecture imports:")
-            print("   • Ensure architectures.py contains your complete source code")
-            print("   • Check for syntax errors in architectures.py")
+            print("\n Fix architecture imports:")
+
         
         if not results.get("Trained Model Loading", True):
-            print("\n🔧 Fix model loading:")
-            print("   • Verify model files exist: models/vae_M10_f.pth, models/FINAL_FIXED_SYMQNET.pth")
-            print("   • Ensure model architecture matches training exactly")
-            print("   • Check model file integrity (not corrupted)")
+            print("\nFix model loading:")
+
     
     return passed == total
 

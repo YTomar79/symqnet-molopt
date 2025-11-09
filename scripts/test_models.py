@@ -2,8 +2,8 @@
 """
 Test model loading with exact architectures
 
-This script specifically tests that  trained models can be loaded
-correctly with  exact architectures from the attached source code.
+This script specifically tests that trained models can be loaded
+correctly with exact architectures from the source code.
 """
 
 import sys

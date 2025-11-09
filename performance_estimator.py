@@ -406,9 +406,7 @@ class PerformanceEstimator:
         print(f"Optimal performance at {self.optimal_qubits} qubits")
 
 
-# ============================================================================
 # CONVENIENCE FUNCTIONS
-# ============================================================================
 
 def quick_performance_check(n_qubits: int, optimal_qubits: int = 10) -> float:
     """Quick performance factor calculation without full report"""
@@ -426,8 +424,6 @@ def print_performance_curve(qubit_range: Tuple[int, int] = (4, 20), optimal_qubi
     estimator = PerformanceEstimator(optimal_qubits)
     curve = estimator.get_performance_curve(qubit_range)
     
-    print(f"\n📈 PERFORMANCE CURVE (Optimal: {optimal_qubits} qubits)")
-    print("=" * 60)
     
     for qubits, performance in curve.items():
         bar_length = int(performance * 40)  # 40-char bar

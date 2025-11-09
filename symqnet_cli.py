@@ -85,8 +85,8 @@ try:
         SpinChainEnv
     )
 except ImportError as e:
-    logger.warning(f"⚠️ Architecture imports failed: {e}")
-    # Continue anyway - let it fail later with clearer error
+    logger.warning(f" Architecture imports failed: {e}")
+    # continue anyway so that we can let it fail later with clearer error
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

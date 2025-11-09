@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 SymQNet Molecular Optimization CLI - CORRECTED UNIVERSAL VERSION
-Fixed the parameter extraction issue by using proven working rollout logic.
 Usage:
     symqnet-molopt --hamiltonian molecule.json --shots 1024 --output results.json
 """
@@ -36,8 +35,8 @@ try:
     logger.info("🌍 Universal mode available")
 except ImportError as e:
     logger = logging.getLogger(__name__)
-    logger.warning(f"⚠️ Universal components not available: {e}")
-    logger.warning("🔧 Falling back to 10-qubit-only mode")
+    logger.warning(f" Universal components not available: {e}")
+    logger.warning("🔧Falling back to 10-qubit-only mode")
     
     # Fallback implementations
     class PerformanceEstimator:
@@ -121,7 +120,7 @@ def ensure_model_files(model_path: Optional[Path],
         try:
             import urllib.request
             urllib.request.urlretrieve(url, filepath)
-            print(f"✅ Downloaded {filepath.name}")
+            print(f" Downloaded {filepath.name}")
             return filepath
         except Exception as e:
             raise click.ClickException(f"Failed to download {filepath.name}: {e}")
@@ -132,7 +131,7 @@ def ensure_model_files(model_path: Optional[Path],
             up = Path(user).expanduser().resolve()
             if up.exists():
                 return up
-            raise click.ClickException(f"❌ File not found: {up}")
+            raise click.ClickException(f" File not found: {up}")
         
         # 2. Wheel-bundled (next to this module)
         filename = MODEL_FILE if "SYMQNET" in url else VAE_FILE
@@ -165,7 +164,7 @@ def ensure_model_files(model_path: Optional[Path],
         final_vae = _resolve(vae_path, bundled_models, rel_vae, VAE_URL)
         return final_model, final_vae
     except Exception as e:
-        raise click.ClickException(f"❌ Model resolution failed: {e}")
+        raise click.ClickException(f" Model resolution failed: {e}")
 
 
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
@@ -215,13 +214,13 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
             if n_qubits > 25:
                 logger.warning(f"Large system ({n_qubits} qubits) may have very long runtime")
             
-            logger.info(f"✅ Validated: {n_qubits}-qubit Hamiltonian (Universal mode)")
+            logger.info(f" Validated: {n_qubits}-qubit Hamiltonian (Universal mode)")
             
         else:
             # Fallback mode - only 10 qubits
             if n_qubits != 10:
                 raise ValueError(
-                    f"❌ FALLBACK MODE: Only 10-qubit systems supported.\n"
+                    f" FALLBACK MODE: Only 10-qubit systems supported.\n"
                     f"   Your Hamiltonian: {n_qubits} qubits\n"
                     f"   Required: exactly 10 qubits\n\n"
                     f"💡 To enable universal support:\n"
@@ -229,7 +228,7 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
                     f"   • Or use a 10-qubit molecular representation"
                 )
             
-            logger.info(f"✅ Validated: {n_qubits}-qubit Hamiltonian (Fallback mode)")
+            logger.info(f" Validated: {n_qubits}-qubit Hamiltonian (Fallback mode)")
         
         return hamiltonian_data
         
@@ -269,7 +268,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         # Step 3: Run rollouts with the WORKING logic
         rollout_results = []
         for i in range(n_rollouts):
-            logger.info(f"🔄 Universal rollout {i+1}/{n_rollouts}")
+            logger.info(f" Universal rollout {i+1}/{n_rollouts}")
             policy.reset()
             
             measurements = []
@@ -295,7 +294,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
                 
                 # Debug: Check if we're getting real parameters
                 if step == 0:
-                    logger.debug(f"🧪 First parameter estimate: shape={param_estimate.shape}, "
+                    logger.debug(f" First parameter estimate: shape={param_estimate.shape}, "
                                 f"range=[{param_estimate.min():.6f}, {param_estimate.max():.6f}]")
                 
                 if step > 5 and policy.has_converged(parameter_estimates):
@@ -384,7 +383,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
             })
         
         # Bootstrap analysis
-        logger.info("📊 Computing confidence intervals...")
+        logger.info(" Computing confidence intervals...")
         bootstrap_results = estimator.compute_intervals(rollout_results)
         
         return {
@@ -398,53 +397,26 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
     
     print("\n" + "="*60)
     if UNIVERSAL_MODE:
-        print("🌍 UNIVERSAL SYMQNET PERFORMANCE ANALYSIS")
+        print(" UNIVERSAL SYMQNET PERFORMANCE ANALYSIS")
     else:
-        print("🔧 FALLBACK MODE ANALYSIS")
+        print(" FALLBACK MODE ANALYSIS")
     print("="*60)
     
     report = performance_estimator.estimate_performance(n_qubits)
     
-    print(f"📊 System Size: {n_qubits} qubits")
-    print(f"🎯 Optimal Size: {performance_estimator.optimal_qubits} qubits")
     
-    if UNIVERSAL_MODE:
-        print(f"📈 Expected Performance: {report.performance_factor:.1%} of optimal")
-        print(f"🏷️ Performance Level: {report.level.value.upper()}")
-        
-        if n_qubits == performance_estimator.optimal_qubits:
-            print("\n✨ Running at optimal performance!")
-        else:
-            if hasattr(report, 'uncertainty_scaling'):
-                print(f"\n📏 Uncertainty Scaling: {report.uncertainty_scaling:.1f}x")
-    else:
-        if n_qubits == 10:
-            print("📈 Expected Performance: 100% (exact training match)")
-            print("✨ Running in supported mode!")
-        else:
-            print("📈 Expected Performance: Not supported in fallback mode")
-            print("⚠️ Only 10-qubit systems supported")
-    
-    # Show recommendations
-    if report.recommendations:
-        print(f"\n💡 RECOMMENDATIONS:")
-        for i, rec in enumerate(report.recommendations[:3], 1):
-            print(f"   {i}. {rec}")
 
 def print_summary(results: Dict, n_qubits: int, performance_factor: float):
     """Print a formatted summary of results with performance context."""
     
-    print("\n" + "="*60)
-    print("🎯 SYMQNET MOLECULAR OPTIMIZATION RESULTS")
-    print("="*60)
+
+    print(" SYMQNET MOLECULAR OPTIMIZATION RESULTS")
+
     
-    print(f"🧪 System: {n_qubits} qubits")
-    print(f"📊 Performance: {performance_factor:.1%} of optimal")
+    print(f" System: {n_qubits} qubits")
+
     
-    if 'fallback_mode' in results:
-        print("🔧 Mode: Fallback (10-qubit only)")
-    elif UNIVERSAL_MODE:
-        print("🌍 Mode: Universal (FIXED)")
+
     
     # Extract results from nested structure if needed
     if 'symqnet_results' in results:
@@ -458,14 +430,14 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
             if isinstance(coupling_params[0], tuple):
                 # Tuple format: (mean, ci_low, ci_high)
                 coupling_count = len(coupling_params)
-                print(f"\n⚛️ COUPLING PARAMETERS ({coupling_count} estimated):")
+                print(f"\n COUPLING PARAMETERS ({coupling_count} estimated):")
                 for i, (mean, ci_low, ci_high) in enumerate(coupling_params):
                     uncertainty = (ci_high - ci_low) / 2
                     print(f"  J_{i}: {mean:8.6f} ± {uncertainty:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
             else:
                 # Dict format
                 coupling_count = len(coupling_params)
-                print(f"\n⚛️ COUPLING PARAMETERS ({coupling_count} estimated):")
+                print(f"\n COUPLING PARAMETERS ({coupling_count} estimated):")
                 for param in coupling_params:
                     i = param.get('index', 0)
                     mean = param.get('mean', 0)
@@ -479,14 +451,14 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
             if isinstance(field_params[0], tuple):
                 # Tuple format: (mean, ci_low, ci_high)
                 field_count = len(field_params)
-                print(f"\n🧲 FIELD PARAMETERS ({field_count} estimated):")
+                print(f"\n FIELD PARAMETERS ({field_count} estimated):")
                 for i, (mean, ci_low, ci_high) in enumerate(field_params):
                     uncertainty = (ci_high - ci_low) / 2
                     print(f"  h_{i}: {mean:8.6f} ± {uncertainty:.6f} [{ci_low:.6f}, {ci_high:.6f}]")
             else:
                 # Dict format
                 field_count = len(field_params)
-                print(f"\n🧲 FIELD PARAMETERS ({field_count} estimated):")
+                print(f"\n FIELD PARAMETERS ({field_count} estimated):")
                 for param in field_params:
                     i = param.get('index', 0)
                     mean = param.get('mean', 0)
@@ -583,8 +555,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     """
     SymQNet Molecular Optimization CLI - FIXED UNIVERSAL VERSION
     
-    🌍 Universal support (any qubit count) with WORKING parameter extraction
-    🔧 Fallback to 10-qubit-only mode if universal components unavailable
+     support (any qubit count) with WORKING parameter extraction
+     Fallback to 10-qubit-only mode if universal components unavailable
     
     Examples:
         symqnet-molopt --hamiltonian H2O_10q.json --output results.json
@@ -599,21 +571,21 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     
     # Display mode information
     if UNIVERSAL_MODE:
-        logger.info("🌍 Universal SymQNet mode enabled (FIXED)")
-        logger.info("   Supports any qubit count ≥2 with optimal performance at 10 qubits")
+        logger.info(" Universal SymQNet mode enabled (FIXED)")
+        logger.info(" Supports any qubit count ≥2 with optimal performance at 10 qubits")
     else:
-        logger.info("🔧 Fallback mode active")
-        logger.info("   Supports exactly 10-qubit systems only")
+        logger.info(" Fallback mode active")
+        logger.info("  Supports exactly 10-qubit systems only")
     
     # 🔧 FIXED: Handle model file paths gracefully
     try:
         model_path, vae_path = ensure_model_files(model_path, vae_path)
-        logger.info(f"✅ Using model: {model_path}")
-        logger.info(f"✅ Using VAE: {vae_path}")
+        logger.info(f" Using model: {model_path}")
+        logger.info(f" Using VAE: {vae_path}")
     except click.ClickException:
         raise  # Re-raise click exceptions as-is
     except Exception as e:
-        raise click.ClickException(f"❌ Model setup failed: {e}")
+        raise click.ClickException(f" Model setup failed: {e}")
     
     # Find hamiltonian file early
     try:
@@ -678,10 +650,10 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         
         # 2. Run Parameter Estimation (Universal or Fallback) - FIXED VERSION
         performance_report = performance_estimator.estimate_performance(n_qubits)
-        logger.info(f"🎯 Expected performance: {performance_report.performance_factor:.1%} of optimal")
+        logger.info(f" Expected performance: {performance_report.performance_factor:.1%} of optimal")
         
-        logger.info(f"🚀 Running FIXED parameter estimation...")
-        logger.info(f"📊 Configuration: {shots} shots, {n_rollouts} rollouts, {max_steps} max steps")
+        logger.info(f" Running FIXED parameter estimation...")
+        logger.info(f" Configuration: {shots} shots, {n_rollouts} rollouts, {max_steps} max steps")
         
         final_results = run_optimization_universal(
             hamiltonian_data=hamiltonian_data,
@@ -695,7 +667,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         )
         
         # 3. Save Results
-        logger.info(f"💾 Saving results to {output}")
+        logger.info(f" Saving results to {output}")
         save_results(
             results=final_results,
             hamiltonian_data=hamiltonian_data,
@@ -721,11 +693,11 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         print_summary(final_results, n_qubits, performance_report.performance_factor)
         
         # Final performance note
-        success_msg = "✅ FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else "✅ Molecular optimization completed successfully!"
+        success_msg = " FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else " Molecular optimization completed successfully!"
         logger.info(success_msg)
         
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f" Error: {e}")
         if verbose:
             import traceback
             traceback.print_exc()

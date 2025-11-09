@@ -26,7 +26,7 @@ def print_header(title):
 
 def print_result(test_name, passed, details=""):
     """Print test result with formatting"""
-    status = "✅ PASS" if passed else "❌ FAIL"
+    status = " PASS" if passed else " FAIL"
     print(f"{test_name:<40} | {status}")
     if details and not passed:
         print(f"    └─ {details}")
@@ -266,7 +266,7 @@ def validate_examples():
     """Validate example Hamiltonian files"""
     print_header("Example Files Validation")
     
-    # 🔧 FIX: Only check for 10-qubit examples
+    # FIX: Only check for 10-qubit examples
     example_files = [
         "examples/H2O_10q.json"
     ]
@@ -391,36 +391,30 @@ def main():
     total = len(results)
     
     for test_name, result in results.items():
-        status = "✅ PASS" if result else "❌ FAIL"
+        status = " PASS" if result else " FAIL"
         print(f"{test_name:<25} | {status}")
     
-    print(f"\n📊 OVERALL RESULT: {passed}/{total} tests passed")
+    print(f"\n OVERALL RESULT: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 ALL VALIDATIONS PASSED! Your SymQNet CLI is ready to use.")
-        print("\n💡 Quick start:")
+        print(" ALL VALIDATIONS PASSED! Your SymQNet CLI is ready to use.")
+        print("\n Quick start:")
         print("   python cli.py --hamiltonian examples/H2O_10q.json --shots 512 --output test.json")
     else:
-        print("⚠️  Some validations failed. Please fix the issues above before using the CLI.")
+        print("  Some validations failed. Please fix the issues above before using the CLI.")
         
         # Provide specific guidance
         if not results.get("File Structure", True):
-            print("\n🔧 File Structure Issues:")
-            print("   • Ensure all required files are in the correct locations")
-            print("   • Check that model files exist in models/ directory")
-            print("   • Run 'symqnet-examples' to create 10-qubit examples")
+            print("\n File Structure Issues:")
+
         
         if not results.get("Model Loading", True):
-            print("\n🔧 Model Loading Issues:")
-            print("   • Verify your trained models are compatible")
-            print("   • Check that architectures.py contains your exact code")
+            print("\n Model Loading Issues:")
+
         
         if not results.get("Integration Test", True):
-            print("\n🔧 Integration Issues:")
-            print("   • Run: python scripts/test_models.py")
-            print("   • Check device compatibility (try --device cpu)")
-            print("   • Ensure 10-qubit examples exist")
-    
+            print("\n Integration Issues:")
+
     return passed == total
 
 if __name__ == "__main__":

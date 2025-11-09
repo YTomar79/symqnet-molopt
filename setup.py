@@ -5,7 +5,7 @@ setup.py for SymQNet-MolOpt (v3.0.20) - FIXED MODEL SHIPPING
 from pathlib import Path
 from setuptools import setup, find_packages
 
-ROOT = Path(__file__).parent.resolve()  # ✅ Fixed __file__
+ROOT = Path(__file__).parent.resolve()  #  Fixed __file__
 
 def read_requirements():
     req = ROOT / "requirements.txt"
@@ -56,7 +56,7 @@ if HAS_PKG:
     }
     data_files = []
 else:
-    # ✅ FIXED: flat-layout with proper model shipping
+    #  FIXED: flat-layout with proper model shipping
     packages = []
     py_modules = [
         "symqnet_cli",
@@ -76,14 +76,14 @@ else:
     ]
     package_data = {}
     
-    # ✅ CRITICAL FIX: Ship models via data_files for flat layout
+    # Ship models via data_files for flat layout
     data_files = []
     models_dir = ROOT / "models"
     if models_dir.is_dir():
         model_file_paths = [str(p.relative_to(ROOT)) for p in models_dir.glob("*.pth")]
         if model_file_paths:
             data_files.append(("models", model_file_paths))
-            print(f"✅ Found {len(model_file_paths)} model files to include: {model_file_paths}")
+            print(f" Found {len(model_file_paths)} model files to include: {model_file_paths}")
     
     # Add examples
     data_files.extend(collect_data_files("examples", "*.json"))
@@ -119,7 +119,7 @@ setup(
     # Resource files  
     include_package_data=True,
     package_data=package_data,
-    data_files=data_files,  # ✅ Now properly populated for flat layout
+    data_files=data_files,  
     # Dependencies
     install_requires=read_requirements(),
     extras_require={

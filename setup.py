@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-setup.py for SymQNet-MolOpt (v3.0.20) - FIXED MODEL SHIPPING
+setup.py for SymQNet-MolOpt (v3.0.21) - FIXED MODEL SHIPPING
 """
 from pathlib import Path
 from setuptools import setup, find_packages
 
-ROOT = Path(__file__).parent.resolve()  #  Fixed __file__
+ROOT = Path(__file__).parent.resolve()  
 
 def read_requirements():
     req = ROOT / "requirements.txt"
@@ -56,7 +56,7 @@ if HAS_PKG:
     }
     data_files = []
 else:
-    #  FIXED: flat-layout with proper model shipping
+    #  flat-layout with proper model shipping
     packages = []
     py_modules = [
         "symqnet_cli",
@@ -94,7 +94,7 @@ long_description = README.read_text(encoding="utf-8") if README.exists() else ""
 
 setup(
     name="symqnet-molopt",
-    version="3.0.20",
+    version="3.0.21",
     description="SymQNet Molecular Optimization via Hamiltonian Estimation",
     long_description=long_description,
     long_description_content_type="text/markdown",

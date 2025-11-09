@@ -1,7 +1,6 @@
 """
 Utility functions for SymQNet molecular optimization
-ENHANCED FOR UNIVERSAL QUBIT SUPPORT with optimal performance at 10 qubits
-FIXED: Parameter extraction in save_results() function
+
 """
 
 import json
@@ -15,7 +14,7 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
-# Universal support - no hard constraints, optimal at 10 qubits
+# Universal support no hard constraints, optimal at 10 qubits
 OPTIMAL_QUBITS = 10
 MIN_VIABLE_QUBITS = 2
 
@@ -36,7 +35,7 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
     if not hamiltonian_path.exists():
         raise ValueError(f"Hamiltonian file not found: {hamiltonian_path}")
     
-    # Universal qubit validation - warnings instead of errors
+    # Universal qubit validation warnings instead of errors
     try:
         with open(hamiltonian_path, 'r') as f:
             data = json.load(f)
@@ -46,7 +45,7 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
         # Minimum viable constraint
         if n_qubits < MIN_VIABLE_QUBITS:
             raise ValueError(
-                f"❌ VALIDATION FAILED: Minimum {MIN_VIABLE_QUBITS} qubits required.\n"
+                f"VALIDATION FAILED: Minimum {MIN_VIABLE_QUBITS} qubits required.\n"
                 f"   Your Hamiltonian: {n_qubits} qubits\n"
                 f"   Minimum viable: {MIN_VIABLE_QUBITS} qubits"
             )
@@ -54,7 +53,7 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
         # Performance guidance instead of hard limits
         if n_qubits != OPTIMAL_QUBITS:
             logger.warning(
-                f"⚠️  Non-optimal qubit count detected: {n_qubits} qubits\n"
+                f" Non-optimal qubit count detected: {n_qubits} qubits\n"
                 f"   Optimal performance: {OPTIMAL_QUBITS} qubits\n"
                 f"   Expected performance degradation for {n_qubits}-qubit system"
             )
@@ -83,12 +82,12 @@ def validate_inputs(hamiltonian_path: Path, shots: int, confidence: float,
     if n_rollouts <= 0:
         raise ValueError("Number of rollouts must be positive")
     
-    logger.debug(f"✅ Input validation passed - {n_qubits}-qubit system accepted")
+    logger.debug(f"Input validation passed - {n_qubits}-qubit system accepted")
 
 def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 config: Dict[str, Any], output_path: Path):
     """
-    🔧 FIXED: Save estimation results to JSON file with universal support.
+    FIXED: Save estimation results to JSON file with universal support.
     Properly extracts parameters from nested results structure.
     """
     
@@ -98,7 +97,6 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
         # Extract performance metadata if available
         performance_metadata = config.get('performance_metadata', {})
         
-        # 🔧 CRITICAL FIX: Robust parameter extraction from nested results structure
         coupling_parameters = []
         field_parameters = []
         
@@ -112,7 +110,7 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
         
         logger.debug(f"🔍 symqnet_data keys: {list(symqnet_data.keys())}")
         
-        # 🔧 FIXED: Extract coupling parameters with detailed debugging
+        #  Fix wa to Extract coupling parameters with detailed debugging
         if 'coupling_parameters' in symqnet_data:
             raw_coupling = symqnet_data['coupling_parameters']
             logger.debug(f"🔍 Raw coupling parameters: type={type(raw_coupling)}, length={len(raw_coupling) if hasattr(raw_coupling, '__len__') else 'N/A'}")
@@ -131,19 +129,19 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                                 'confidence_interval': [float(ci_low), float(ci_high)],
                                 'uncertainty': float(ci_high - ci_low) / 2.0
                             })
-                            logger.debug(f"✅ Processed coupling parameter {i}: {mean:.6f}")
+                            logger.debug(f" Processed coupling parameter {i}: {mean:.6f}")
                         elif isinstance(param_data, dict):
                             # Dict format - already properly formatted
                             coupling_parameters.append(param_data)
-                            logger.debug(f"✅ Added coupling parameter dict {i}")
+                            logger.debug(f" Added coupling parameter dict {i}")
                         else:
                             logger.warning(f"Unexpected coupling parameter format at index {i}: {type(param_data)} = {param_data}")
                     except Exception as e:
                         logger.error(f"Error processing coupling parameter {i}: {e}")
             else:
-                logger.warning("⚠️ coupling_parameters is empty or None")
+                logger.warning(" coupling_parameters is empty or None")
         else:
-            logger.warning("⚠️ No 'coupling_parameters' key found in symqnet_data")
+            logger.warning(" No 'coupling_parameters' key found in symqnet_data")
         
         # 🔧 FIXED: Extract field parameters with detailed debugging
         if 'field_parameters' in symqnet_data:
@@ -164,24 +162,22 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                                 'confidence_interval': [float(ci_low), float(ci_high)],
                                 'uncertainty': float(ci_high - ci_low) / 2.0
                             })
-                            logger.debug(f"✅ Processed field parameter {i}: {mean:.6f}")
+                            logger.debug(f" Processed field parameter {i}: {mean:.6f}")
                         elif isinstance(param_data, dict):
                             # Dict format - already properly formatted
                             field_parameters.append(param_data)
-                            logger.debug(f"✅ Added field parameter dict {i}")
+                            logger.debug(f" Added field parameter dict {i}")
                         else:
                             logger.warning(f"Unexpected field parameter format at index {i}: {type(param_data)} = {param_data}")
                     except Exception as e:
                         logger.error(f"Error processing field parameter {i}: {e}")
             else:
-                logger.warning("⚠️ field_parameters is empty or None")
+                logger.warning(" field_parameters is empty or None")
         else:
-            logger.warning("⚠️ No 'field_parameters' key found in symqnet_data")
+            logger.warning(" No 'field_parameters' key found in symqnet_data")
         
-        # 🔧 CRITICAL: Log what we extracted for debugging
-        logger.info(f"✅ Extracted {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters for saving")
+        logger.info(f" Extracted {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters for saving")
         
-        # Extract other symqnet_results data with safe defaults
         total_uncertainty = float(symqnet_data.get('total_uncertainty', 0.0))
         avg_measurements = float(symqnet_data.get('avg_measurements_used', symqnet_data.get('avg_measurements', 0.0)))
         confidence_level = float(symqnet_data.get('confidence_level', 0.95))
@@ -190,8 +186,8 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
         # Build output data with correctly extracted parameters
         output_data = {
             'symqnet_results': {
-                'coupling_parameters': coupling_parameters,  # ✅ FIXED
-                'field_parameters': field_parameters,        # ✅ FIXED
+                'coupling_parameters': coupling_parameters, 
+                'field_parameters': field_parameters,        
                 'total_uncertainty': total_uncertainty,
                 'avg_measurements_used': avg_measurements,
                 'confidence_level': confidence_level,
@@ -223,7 +219,7 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                     'field': len(field_parameters),
                     'total': len(coupling_parameters) + len(field_parameters)
                 },
-                'parameter_extraction_fixed': True  # ✅ Mark as fixed
+                'parameter_extraction_fixed': True  # mark as fixed
             }
         }
         
@@ -262,8 +258,8 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
                 json.dump(output_data, f, indent=2, ensure_ascii=False)
             
             file_size = output_path.stat().st_size
-            logger.info(f"✅ Results saved to {output_path} ({file_size} bytes)")
-            logger.info(f"📊 Saved {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters")  # ✅ FIXED
+            logger.info(f" Results saved to {output_path} ({file_size} bytes)")
+            logger.info(f" Saved {len(coupling_parameters)} coupling + {len(field_parameters)} field parameters")  # FIXED
             
         except PermissionError:
             logger.error(f"Permission denied writing to: {output_path}")
@@ -273,7 +269,7 @@ def save_results(results: Dict[str, Any], hamiltonian_data: Dict[str, Any],
             raise
             
     except Exception as e:
-        logger.error(f"❌ Failed to save results: {e}")
+        logger.error(f" Failed to save results: {e}")
         # Try to save minimal results as fallback
         try:
             fallback_data = {
@@ -322,7 +318,7 @@ def verify_json_output(output_path: Path) -> bool:
                         logger.error(f"Missing key in parameter: {param_key}")
                         return False
         
-        logger.info("✅ JSON output structure verified")
+        logger.info(" JSON output structure verified")
         return True
         
     except json.JSONDecodeError as e:
@@ -345,7 +341,7 @@ def validate_hamiltonian_data(data: Dict[str, Any]) -> bool:
     # Universal qubit validation - warnings instead of errors
     n_qubits = data['n_qubits']
     if n_qubits < MIN_VIABLE_QUBITS:
-        logger.error(f"❌ INVALID QUBIT COUNT: {n_qubits} < {MIN_VIABLE_QUBITS} (minimum viable)")
+        logger.error(f" INVALID QUBIT COUNT: {n_qubits} < {MIN_VIABLE_QUBITS} (minimum viable)")
         return False
     
     # Performance guidance
@@ -370,7 +366,7 @@ def validate_hamiltonian_data(data: Dict[str, Any]) -> bool:
                 logger.error(f"Pauli term {i}: string length {pauli_len} != {n_qubits} qubits")
                 return False
     
-    logger.debug(f"✅ Hamiltonian data validation passed - {n_qubits} qubits accepted")
+    logger.debug(f" Hamiltonian data validation passed - {n_qubits} qubits accepted")
     return True
 
 def _estimate_performance_factor(n_qubits: int) -> float:
@@ -411,38 +407,28 @@ def create_molecular_hamiltonian_examples():
                 json.dump(data, f, indent=2)
             
             optimal_marker = " ⭐ OPTIMAL" if n_qubits == OPTIMAL_QUBITS else ""
-            print(f"✅ Created {filename} ({n_qubits} qubits){optimal_marker}")
+            print(f" Created {filename} ({n_qubits} qubits){optimal_marker}")
             
         except ValueError as e:
-            print(f"❌ Cannot create {molecule}_{n_qubits}q: {e}")
+            print(f" Cannot create {molecule}_{n_qubits}q: {e}")
 
 def print_universal_support_info():
     """Print information about universal qubit support."""
     
     print(f"""
-🌍 UNIVERSAL SYMQNET-MOLOPT SUPPORT
-{'='*50}
-✅ Supported qubits: {MIN_VIABLE_QUBITS}+ (any molecular system)
-🎯 Optimal qubits: {OPTIMAL_QUBITS} (maximum accuracy)
-📈 Performance: Degrades gracefully from optimum
+UNIVERSAL SYMQNET-MOLOPT SUPPORT
 
-💡 Performance expectations:
-   • 4-8 qubits:  Good performance (85-97%)
-   • 10 qubits:   Optimal performance (100%) ⭐
-   • 12-16 qubits: Moderate degradation (75-90%)
-   • 20+ qubits:   Significant degradation (<70%)
-
-🚀 Universal capabilities:
+Universal capabilities:
    • Automatic normalization for any system size
    • Intelligent parameter scaling
    • Performance warnings and recommendations
    • Works with existing workflows
 
-📚 Usage examples:
+Usage examples:
    • symqnet-molopt --hamiltonian H2_4q.json --output results.json
-   • symqnet-molopt --hamiltonian H2O_10q.json --output results.json  ⭐
+   • symqnet-molopt --hamiltonian H2O_10q.json --output results.json 
    • symqnet-molopt --hamiltonian large_mol_20q.json --output results.json
-{'='*50}
+
 """)
 
 def check_model_compatibility(n_qubits: int) -> Tuple[bool, float]:
@@ -455,7 +441,7 @@ def suggest_qubit_mapping(current_qubits: int) -> str:
     """Suggest how to optimize system for better performance."""
     
     if current_qubits == OPTIMAL_QUBITS:
-        return "✅ Perfect! Your system is at the optimal qubit count for maximum accuracy."
+        return " Perfect! Your system is at the optimal qubit count for maximum accuracy."
     
     elif current_qubits < OPTIMAL_QUBITS:
         diff = OPTIMAL_QUBITS - current_qubits
@@ -546,7 +532,7 @@ def format_parameter_results(coupling_params: List[float], field_params: List[fl
         else:
             result_str += f"  J_{i}: {param:.6f}\n"
     
-    result_str += "\n🧲 FIELD PARAMETERS (h):\n"
+    result_str += "\n FIELD PARAMETERS (h):\n"
     for i, param in enumerate(field_params):
         uncertainty_idx = len(coupling_params) + i
         if uncertainties and uncertainty_idx < len(uncertainties):

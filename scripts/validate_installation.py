@@ -63,7 +63,6 @@ def validate_file_structure():
         ("requirements.txt", "Python dependencies"),
         ("models/vae_M10_f.pth", "Pre-trained VAE model"),
         ("models/FINAL_FIXED_SYMQNET.pth", "Trained SymQNet model"),
-        # 🔧 FIX: Check for 10-qubit examples only
         ("examples/H2O_10q.json", "H2O molecule example (10 qubits)"),
         ("scripts/create_examples.py", "Example generator script"),
         ("scripts/test_models.py", "Model testing script")
@@ -131,7 +130,6 @@ def validate_architecture_imports():
     
     all_imports_ok = True
     
-    # 🔧 FIX: Safer import testing
     try:
         import architectures
         print_result("architectures module", True, "Module imported successfully")
@@ -188,7 +186,7 @@ def validate_model_loading():
         
         # Model parameters from your exact training
         n_qubits = 10
-        L = 64  # 🔧 FIX: Correct base dimension
+        L = 64  # THIS is the  Correct base dimension
         T = 10
         M_evo = 5
         A = n_qubits * 3 * M_evo
@@ -201,7 +199,7 @@ def validate_model_loading():
         symqnet = FixedSymQNetWithEstimator(
             vae=vae,
             n_qubits=n_qubits,
-            L=L,  # 🔧 FIX: Use L=64, not L=82
+            L=L,  # need to use L=64, not L=82
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -266,7 +264,6 @@ def validate_examples():
     """Validate example Hamiltonian files"""
     print_header("Example Files Validation")
     
-    # FIX: Only check for 10-qubit examples
     example_files = [
         "examples/H2O_10q.json"
     ]
@@ -291,7 +288,6 @@ def validate_examples():
                 n_qubits = data['n_qubits']
                 n_terms = len(data['pauli_terms'])
                 
-                # 🔧 FIX: Validate 10-qubit constraint
                 if n_qubits == 10:
                     print_result(f"{example_file}", True, f"{n_qubits}q, {n_terms} terms")
                 else:
@@ -316,7 +312,6 @@ def run_integration_test():
     print_header("Integration Test")
     
     try:
-        # 🔧 FIX: Create 10-qubit example first if needed
         h2o_example = Path("examples/H2O_10q.json")
         if not h2o_example.exists():
             print_result("Creating test example", True, "No 10-qubit example found")

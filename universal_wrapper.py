@@ -27,10 +27,10 @@ class UniversalSymQNetWrapper:
             device: PyTorch device (cpu/cuda)
         """
         self.device = device
-        self.trained_qubits = 10  # Your model's trained sweet spot
-        self.vae_latent = 64     # From your training
-        self.metadata_dim = 18   # From your training: 10 + 3 + 5
-        self.M_evo = 5          # From your training
+        self.trained_qubits = 10 
+        self.vae_latent = 64     
+        self.metadata_dim = 18   # 10 + 3 + 5
+        self.M_evo = 5          
         
         # Store paths
         self.model_path = trained_model_path
@@ -77,7 +77,7 @@ class UniversalSymQNetWrapper:
         
         original_qubits = hamiltonian_data['n_qubits']
         
-        logger.info(f"🌍 Universal estimation: {original_qubits} qubits → {self.trained_qubits} qubits → {original_qubits} qubits")
+        logger.info(f" estimation: {original_qubits} qubits → {self.trained_qubits} qubits → {original_qubits} qubits")
         
         # Performance warning
         if warn_degradation and original_qubits != self.trained_qubits:
@@ -114,7 +114,7 @@ class UniversalSymQNetWrapper:
             'optimal_at': self.trained_qubits
         }
         
-        logger.info(f"✅ Universal parameter estimation completed for {original_qubits}-qubit system")
+        logger.info(f"Universal parameter estimation completed for {original_qubits}-qubit system")
         return final_results
     
     def _normalize_hamiltonian(self, hamiltonian_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,13 +156,13 @@ class UniversalSymQNetWrapper:
             if len(normalized_string) != self.trained_qubits:
                 raise ValueError(f"Normalization error: normalized string length {len(normalized_string)} != {self.trained_qubits}")
             
-            # 🔧 CRITICAL FIX: Convert pauli_string to pauli_indices for MeasurementSimulator
+            #  Convert pauli_string to pauli_indices for MeasurementSimulator
             pauli_indices = self._pauli_string_to_indices(normalized_string)
             
             normalized_terms.append({
                 'coefficient': normalized_coeff,
                 'pauli_string': normalized_string,
-                'pauli_indices': pauli_indices,  # ✅ ADDED: Required by MeasurementSimulator
+                'pauli_indices': pauli_indices,  # bruh The fix was to require MeasurementSimulator
                 'original_coefficient': coeff,
                 'scale_factor': scale_factor,
                 'description': term.get('description', f'Normalized term {i}')

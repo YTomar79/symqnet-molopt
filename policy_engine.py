@@ -275,9 +275,9 @@ class PolicyEngine:
                     theta_np = np.zeros(19)
                 
                 if np.allclose(theta_np, 0, atol=1e-10):
-                    logger.warning(f"⚠️ All parameters are zero at step {self.step_count}")
+                    logger.warning(f" All parameters are zero at step {self.step_count}")
                 else:
-                    logger.debug(f"✅ Got non-zero parameters: range [{theta_np.min():.6f}, {theta_np.max():.6f}]")
+                    logger.debug(f" Got non-zero parameters: range [{theta_np.min():.6f}, {theta_np.max():.6f}]")
                 
                 self.parameter_history.append(theta_np)
                 
@@ -286,7 +286,7 @@ class PolicyEngine:
                 action_info = self._decode_action(action_idx)
                 
         except Exception as e:
-            logger.error(f"❌ Error in get_action: {e}")
+            logger.error(f" Error in get_action: {e}")
             # Fallback: use dummy parameters
             theta_np = np.zeros(19)
             self.parameter_history.append(theta_np)
@@ -346,11 +346,11 @@ class PolicyEngine:
         """Get current parameter estimate from policy."""
         if self.parameter_history:
             estimate = self.parameter_history[-1]
-            logger.debug(f"🎯 Returning parameter estimate: shape={estimate.shape}, "
+            logger.debug(f" Returning parameter estimate: shape={estimate.shape}, "
                         f"range=[{estimate.min():.6f}, {estimate.max():.6f}]")
             return estimate
         else:
-            logger.warning("⚠️ No parameter history, returning zeros")
+            logger.warning(" No parameter history, returning zeros")
             return np.zeros(19)
     
     def has_converged(self, parameter_estimates: List[np.ndarray]) -> bool:

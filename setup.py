@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup.py for SymQNet-MolOpt (v3.0.21) - FIXED MODEL SHIPPING
+setup.py for SymQNet-MolOpt (v3.0.21)
 """
 from pathlib import Path
 from setuptools import setup, find_packages

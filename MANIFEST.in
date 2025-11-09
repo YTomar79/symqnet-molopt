@@ -1,5 +1,4 @@
 # SymQNet-MolOpt Universal Package Manifest
-# Include all necessary files for universal qubit support
 
 # Core documentation
 include README.md
@@ -8,7 +7,6 @@ include requirements.txt
 include CHANGELOG.md
 include MANIFEST.in
 
-# 🌍 UNIVERSAL: Core Python modules
 include symqnet_cli.py
 include universal_wrapper.py
 include performance_estimator.py
@@ -25,7 +23,7 @@ include setup.py
 include setup.cfg
 include pyproject.toml
 
-# Example molecular systems (various qubit counts)
+# Example molecular systems (with various qubit counts)
 recursive-include examples *.json
 recursive-include examples *.md
 recursive-include examples README*

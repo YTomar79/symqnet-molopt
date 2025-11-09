@@ -1,6 +1,5 @@
 """
 Bootstrap estimator for uncertainty quantification - ENHANCED DEBUG VERSION
-This version will show us exactly what's wrong with the rollout data
 """
 
 import numpy as np
@@ -99,15 +98,15 @@ class BootstrapEstimator:
                         if not np.allclose(final_array, 0, atol=1e-10):
                             final_estimates.append(final_array)
                             convergence_steps.append(estimate.get('convergence_step', 0))
-                            logger.info(f"✅ Rollout {i}: Valid final estimate with {final_array.size} parameters")
+                            logger.info(f" Rollout {i}: Valid final estimate with {final_array.size} parameters")
                         else:
-                            logger.warning(f"⚠️ Rollout {i}: final_estimate is all zeros - skipping")
+                            logger.warning(f" Rollout {i}: final_estimate is all zeros - skipping")
                     else:
-                        logger.warning(f"⚠️ Rollout {i}: final_estimate is empty - skipping")
+                        logger.warning(f" Rollout {i}: final_estimate is empty - skipping")
                 except Exception as e:
-                    logger.warning(f"⚠️ Rollout {i}: Cannot process final_estimate: {e}")
+                    logger.warning(f" Rollout {i}: Cannot process final_estimate: {e}")
             else:
-                logger.warning(f"⚠️ Rollout {i}: No final_estimate - checking parameter_estimates...")
+                logger.warning(f" Rollout {i}: No final_estimate - checking parameter_estimates...")
                 
                 # 🔧 FALLBACK: Try to extract from parameter_estimates
                 param_ests = estimate.get('parameter_estimates', [])
@@ -119,7 +118,7 @@ class BootstrapEstimator:
                                 if pe_array.size > 0 and not np.allclose(pe_array, 0, atol=1e-10):
                                     final_estimates.append(pe_array)
                                     convergence_steps.append(len(param_ests))
-                                    logger.info(f"✅ Rollout {i}: Extracted from parameter_estimates")
+                                    logger.info(f" Rollout {i}: Extracted from parameter_estimates")
                                     break
                             except:
                                 continue
@@ -127,7 +126,7 @@ class BootstrapEstimator:
         logger.info(f"🎯 SUMMARY: Found {len(final_estimates)} valid parameter estimates from {len(estimates)} rollouts")
         
         if not final_estimates:
-            logger.error("❌ NO VALID PARAMETER ESTIMATES FOUND!")
+            logger.error(" NO VALID PARAMETER ESTIMATES FOUND!")
             logger.error("This means the policy engine is not generating meaningful parameters")
             logger.error("Possible causes:")
             logger.error("1. Neural network not loaded properly")
@@ -162,7 +161,7 @@ class BootstrapEstimator:
         
         final_estimates = np.array(final_estimates)  # [n_rollouts, n_params]
         
-        logger.info(f"📊 Final estimates array shape: {final_estimates.shape}")
+        logger.info(f" Final estimates array shape: {final_estimates.shape}")
         
         # Flexible parameter count handling
         n_params = final_estimates.shape[1]
@@ -208,7 +207,7 @@ class BootstrapEstimator:
             'detected_qubits': n_qubits
         }
         
-        logger.info(f"✅ Successfully extracted {len(coupling_results)} coupling + {len(field_results)} field parameters")
+        logger.info(f" Successfully extracted {len(coupling_results)} coupling + {len(field_results)} field parameters")
         return results
     
     def _bootstrap_parameters(self, estimates: np.ndarray, 
@@ -222,7 +221,7 @@ class BootstrapEstimator:
         n_rollouts, n_params = estimates.shape
         results = []
         
-        logger.info(f"🔢 Bootstrapping {n_params} {param_type} parameters from {n_rollouts} rollouts")
+        logger.info(f" Bootstrapping {n_params} {param_type} parameters from {n_rollouts} rollouts")
         
         for param_idx in range(n_params):
             param_values = estimates[:, param_idx]

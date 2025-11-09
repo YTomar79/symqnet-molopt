@@ -47,7 +47,7 @@ class PolicyEngine:
         for p in self.vae.parameters():
             p.requires_grad = False
         
-        # FIXED: Inspect checkpoint to determine EXACT architecture
+        #Inspect checkpoint to determine EXACT architecture
         checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
         
         # Get the actual state dict

@@ -33,7 +33,7 @@ def mock_hamiltonian():
     return {
         "format": "openfermion",
         "molecule": "test_10q",
-        "n_qubits": 10,  # ✅ FIXED: Must be 10 for SymQNet
+        "n_qubits": 10,  # must be 10 for SymQNet
         "pauli_terms": [
             {"coefficient": -2.0, "pauli_string": "IIIIIIIIII"},
             {"coefficient": 0.5, "pauli_string": "ZIIIIIIIII"},

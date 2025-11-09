@@ -1,6 +1,6 @@
 """
 Policy Engine for SymQNet integration 
-Fixed tensor shapes, error checking, and parameter extraction
+Fixed tensor shapes, error checking, and parameter extraction.
 """
 
 import torch

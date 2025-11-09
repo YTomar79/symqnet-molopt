@@ -13,9 +13,8 @@ import warnings
 logger = logging.getLogger(__name__)
 
 class HamiltonianParser:
-    """Parse molecular Hamiltonians from various formats with universal qubit support."""
+    """Parse molecular Hamiltonians from various formats with qubit support."""
     
-    # Universal support - optimal at 10 qubits, works with any viable count
     OPTIMAL_QUBITS = 10
     MIN_VIABLE_QUBITS = 2
     

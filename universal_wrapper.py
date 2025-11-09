@@ -1,7 +1,5 @@
 """
-Universal SymQNet Wrapper - FIXED for MeasurementSimulator compatibility
-Makes 10-qubit trained SymQNet work for any molecular system
-Performance degrades gracefully as you move away from 10 qubits
+Universal SymQNet Wrapper Code
 """
 
 import torch

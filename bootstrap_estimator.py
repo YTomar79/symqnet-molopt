@@ -1,5 +1,5 @@
 """
-Bootstrap estimator for uncertainty quantification - ENHANCED DEBUG VERSION
+Bootstrap estimator for uncertainty quantification
 """
 
 import numpy as np

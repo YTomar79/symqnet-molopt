@@ -97,9 +97,9 @@ class HamiltonianValidator:
                 f"   Your Hamiltonian: {n_qubits} qubits\n"
                 f"   Required: {SUPPORTED_QUBITS} qubits\n\n"
                 f" To fix this:\n"
-                f"   • Map your system to {SUPPORTED_QUBITS} qubits using active space approximation\n"
-                f"   • Use Jordan-Wigner encoding with appropriate truncation\n"
-                f"   • Apply symmetry reduction techniques"
+                f" • Map your system to {SUPPORTED_QUBITS} qubits using active space approximation\n"
+                f" • Use Jordan-Wigner encoding with appropriate truncation\n"
+                f" • Apply symmetry reduction techniques"
             )
             return False
         
@@ -286,8 +286,8 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
     
     # Print validation results
     if not quiet:
-        print(f"📁 File: {hamiltonian_file}")
-        print(f"📏 Size: {hamiltonian_file.stat().st_size / 1024:.1f} KB")
+        print(f" File: {hamiltonian_file}")
+        print(f" Size: {hamiltonian_file.stat().st_size / 1024:.1f} KB")
     
     if validator.errors:
         print("\n VALIDATION FAILED:")
@@ -295,7 +295,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
             print(f"   {error}")
         
         if not quiet:
-            print(f"\n💡 Fix these issues and try again.")
+            print(f"\n Fix these issues and try again.")
         
         raise click.ClickException("Validation failed")
     
@@ -314,19 +314,19 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
     # If validation-only, stop here
     if validate_only:
         if not quiet:
-            print(f"\n🎯 File is compatible with SymQNet-MolOpt!")
+            print(f"\n File is compatible with SymQNet-MolOpt!")
         return
     
     # Determine target directory and filename
     if to_examples:
         target_dir = EXAMPLES_DIR
         if not quiet:
-            print(f"\n📁 Adding to examples directory...")
+            print(f"\n Adding to examples directory...")
     else:
         target_dir = USER_DIR
         target_dir.mkdir(exist_ok=True)
         if not quiet:
-            print(f"\n📁 Adding to user directory...")
+            print(f"\n Adding to user directory...")
     
     # Generate filename
     if output_name:

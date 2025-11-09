@@ -84,7 +84,6 @@ def create_beh2_example():
             {"coefficient": 0.0934, "pauli_string": "IIZIIZII"},
             {"coefficient": -0.0621, "pauli_string": "IZIIIIZI"},
             {"coefficient": 0.1456, "pauli_string": "XIIIIIIX"},
-            # 🔧 FIX: Correct Pauli string
             {"coefficient": 0.1456, "pauli_string": "YIIIIIYY"}  # Was "YIIIIITY"
         ],
         "true_parameters": {
@@ -125,7 +124,6 @@ def create_water_example():
         "description": "H2O molecule optimized for SymQNet 10-qubit training"
     }
 
-# 🔧 FIX: Proper newline and default parameter
 def create_test_hamiltonian(n_qubits=10):  # Default to 10 qubits
     """Create a simple test Hamiltonian for debugging"""
     np.random.seed(42)  # Reproducible
@@ -141,7 +139,7 @@ def create_test_hamiltonian(n_qubits=10):  # Default to 10 qubits
     # Single-qubit Z terms
     for i in range(n_qubits):
         coeff = np.random.uniform(0.1, 0.5)
-        pauli_str = list("I" * n_qubits)  # 🔧 FIX: Use list for easier manipulation
+        pauli_str = list("I" * n_qubits)  
         pauli_str[i] = "Z"
         pauli_terms.append({
             "coefficient": coeff,
@@ -151,9 +149,9 @@ def create_test_hamiltonian(n_qubits=10):  # Default to 10 qubits
     # Two-qubit ZZ terms
     for i in range(n_qubits - 1):
         coeff = np.random.uniform(0.05, 0.2)
-        pauli_str = list("I" * n_qubits)  # 🔧 FIX: Use list
+        pauli_str = list("I" * n_qubits)  # Use list
         pauli_str[i] = "Z"
-        pauli_str[i + 1] = "Z"  # 🔧 FIX: Correct adjacent qubits
+        pauli_str[i + 1] = "Z"  #Correct adjacent qubits
         pauli_terms.append({
             "coefficient": coeff,
             "pauli_string": "".join(pauli_str)
@@ -163,7 +161,7 @@ def create_test_hamiltonian(n_qubits=10):  # Default to 10 qubits
     for i in range(min(2, n_qubits - 1)):
         # XX term
         coeff_x = np.random.uniform(0.05, 0.15)
-        pauli_str_x = list("I" * n_qubits)  # 🔧 FIX: Use list
+        pauli_str_x = list("I" * n_qubits)  # Use list
         pauli_str_x[i] = "X"
         pauli_str_x[i + 1] = "X"
         pauli_terms.append({
@@ -173,7 +171,7 @@ def create_test_hamiltonian(n_qubits=10):  # Default to 10 qubits
         
         # YY term  
         coeff_y = np.random.uniform(0.05, 0.15)
-        pauli_str_y = list("I" * n_qubits)  # 🔧 FIX: Use list
+        pauli_str_y = list("I" * n_qubits)  
         pauli_str_y[i] = "Y"
         pauli_str_y[i + 1] = "Y"
         pauli_terms.append({
@@ -233,7 +231,6 @@ def main():
     examples_dir = Path("../examples")
     examples_dir.mkdir(exist_ok=True)
     
-    # 🔧 FIX: Expanded 10-qubit examples
     examples = [
         ("H2O_10q.json", create_water_example()),  # Primary example
         ("H2O_alt_10q.json", create_additional_10q_examples()),  # Alternative
@@ -250,7 +247,6 @@ def main():
         filepath = examples_dir / filename
         
         try:
-            # 🔧 FIX: Additional validation before writing
             if data['n_qubits'] != 10:
                 print(f"❌ {filename:<15} | ERROR: {data['n_qubits']} qubits (must be 10)")
                 continue

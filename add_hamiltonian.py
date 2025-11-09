@@ -278,7 +278,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
     
     if not quiet:
         print(" SymQNet-MolOpt Hamiltonian Validator")
-        print("=" * 50)
+
     
     # Validate the file
     validator = HamiltonianValidator()

@@ -50,10 +50,10 @@ class HamiltonianParser:
         
         if n_qubits < self.MIN_VIABLE_QUBITS:
             raise ValueError(
-                f"❌ VALIDATION FAILED: Minimum {self.MIN_VIABLE_QUBITS} qubits required.\n"
+                f"VALIDATION FAILED: Minimum {self.MIN_VIABLE_QUBITS} qubits required.\n"
                 f"   Your Hamiltonian: {n_qubits} qubits\n"
                 f"   Minimum viable: {self.MIN_VIABLE_QUBITS} qubits\n\n"
-                f"💡 SymQNet-MolOpt requires at least {self.MIN_VIABLE_QUBITS} qubits for meaningful molecular representation."
+                f"SymQNet-MolOpt requires at least {self.MIN_VIABLE_QUBITS} qubits for meaningful molecular representation."
             )
         
         # Performance guidance instead of hard constraint
@@ -62,14 +62,14 @@ class HamiltonianParser:
             
             if performance_factor < 0.7:  # Significant degradation
                 logger.warning(
-                    f"⚠️  PERFORMANCE WARNING: {n_qubits}-qubit system will operate at "
+                    f"PERFORMANCE WARNING: {n_qubits}-qubit system will operate at "
                     f"{performance_factor:.1%} of optimal performance.\n"
                     f"   Optimal qubit count: {self.OPTIMAL_QUBITS}\n"
                     f"   Consider system size optimization for better accuracy."
                 )
             else:
                 logger.info(
-                    f"📊 System: {n_qubits} qubits ({performance_factor:.1%} of optimal performance)"
+                    f" System: {n_qubits} qubits ({performance_factor:.1%} of optimal performance)"
                 )
         
         # Parse based on format
@@ -619,33 +619,30 @@ class HamiltonianParser:
         """Suggest how to optimize system for better performance."""
         
         if n_qubits == self.OPTIMAL_QUBITS:
-            return "✅ System already at optimal qubit count for maximum performance"
+            return "System already at optimal qubit count for maximum performance"
         
         performance = self._estimate_performance_factor(n_qubits)
         
         if n_qubits < self.OPTIMAL_QUBITS:
             diff = self.OPTIMAL_QUBITS - n_qubits
             return (
-                f"📊 Current: {n_qubits} qubits ({performance:.1%} performance)\n"
-                f"🎯 Optimal: {self.OPTIMAL_QUBITS} qubits (100% performance)\n\n"
-                f"💡 To reach optimal performance (+{diff} qubits):\n"
+                f" To reach optimal performance\n"
                 f"   • Expand active space to include {diff} more orbitals\n"
                 f"   • Use larger basis set (STO-3G → cc-pVDZ)\n"
                 f"   • Include virtual orbitals\n"
                 f"   • Add ancilla qubits for error correction\n\n"
-                f"📈 Expected improvement: {performance:.1%} → 100% performance"
+                f" Expected improvement: {performance:.1%} → 100% performance"
             )
         else:
             diff = n_qubits - self.OPTIMAL_QUBITS
             return (
-                f"📊 Current: {n_qubits} qubits ({performance:.1%} performance)\n"
-                f"🎯 Optimal: {self.OPTIMAL_QUBITS} qubits (100% performance)\n\n"
-                f"💡 To reach optimal performance (-{diff} qubits):\n"
+
+                f" To reach optimal performance:\n"
                 f"   • Freeze {diff} core orbitals\n"
                 f"   • Use smaller active space\n"
                 f"   • Apply symmetry reduction\n"
                 f"   • Use effective Hamiltonian approximation\n\n"
-                f"📈 Expected improvement: {performance:.1%} → 100% performance"
+                f" Expected improvement: {performance:.1%} → 100% performance"
             )
     
     def create_universal_examples(self, output_dir: Path = Path("examples")) -> None:
@@ -678,12 +675,12 @@ class HamiltonianParser:
                     json.dump(hamiltonian, f, indent=2)
                 
                 performance = self._estimate_performance_factor(n_qubits)
-                optimal_marker = " ⭐ OPTIMAL" if n_qubits == self.OPTIMAL_QUBITS else ""
+                optimal_marker = "  OPTIMAL" if n_qubits == self.OPTIMAL_QUBITS else ""
                 
-                print(f"✅ {filename:<20} ({n_qubits:2d} qubits, {performance:.1%} performance){optimal_marker}")
+                print(f" {filename:<20} ({n_qubits:2d} qubits, {performance:.1%} performance){optimal_marker}")
                 
             except Exception as e:
-                print(f"❌ Failed to create {molecule}_{n_qubits}q: {e}")
+                print(f" Failed to create {molecule}_{n_qubits}q: {e}")
         
 
         print(f"Examples created - test with:")
@@ -691,9 +688,7 @@ class HamiltonianParser:
         print(f"   symqnet-molopt --hamiltonian examples/NH3_12q.json --output results.json")
 
 
-# ============================================================================
 # CONVENIENCE FUNCTIONS
-# ============================================================================
 
 def load_hamiltonian_universal(file_path: Path, warn_performance: bool = True) -> Dict[str, Any]:
     """Convenience function to load Hamiltonian with universal support."""

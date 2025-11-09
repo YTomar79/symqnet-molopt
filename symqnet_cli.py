@@ -25,7 +25,7 @@ from policy_engine import PolicyEngine
 from bootstrap_estimator import BootstrapEstimator
 from utils import setup_logging, validate_inputs, save_results
 
-# 🔧 GRACEFUL IMPORT HANDLING FOR UNIVERSAL COMPONENTS
+#GRACEFUL IMPORT HANDLING FOR Uni COMPONENTS
 UNIVERSAL_MODE = False
 try:
     from universal_wrapper import UniversalSymQNetWrapper
@@ -148,7 +148,6 @@ def ensure_model_files(model_path: Optional[Path],
 
     # Find wheel-bundled models directory
     try:
-        # Fixed: Use __file__ instead of **file**
         pkg_dir = Path(__file__).parent
         bundled_models = pkg_dir / "models"
     except:
@@ -239,15 +238,14 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
 
 def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, shots, n_rollouts, max_steps, warn_performance=True):
     """
-    🔧 FIXED: Run optimization with working parameter extraction
+    Run optimization with working parameter extraction
     Uses proven rollout logic for both universal and fallback modes
     """
     
     original_qubits = hamiltonian_data['n_qubits']
     
     if UNIVERSAL_MODE:
-        # 🔧 FIXED: Use working rollout logic with universal normalization
-        logger.info("🌍 Using Universal SymQNet with FIXED parameter extraction")
+        logger.info("Using Universal SymQNet with parameter extraction")
         
         # Step 1: Normalize Hamiltonian for 10-qubit processing
         universal_wrapper = UniversalSymQNetWrapper(
@@ -276,7 +274,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
             current_measurement = simulator.get_initial_measurement()
             
             for step in range(max_steps):
-                # 🔧 THIS IS THE WORKING LOGIC FROM FALLBACK MODE
+                #  THIS IS THE WORKING LOGIC FROM FALLBACK MODE
                 action_info = policy.get_action(current_measurement)
                 measurement_result = simulator.execute_measurement(
                     qubit_indices=action_info['qubits'],
@@ -286,7 +284,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
                 
                 measurements.append(measurement_result)
                 
-                # 🔧 CRITICAL: This call actually works!
+                #  This call actually works!
                 param_estimate = policy.get_parameter_estimate()
                 parameter_estimates.append(param_estimate)
                 
@@ -552,7 +550,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
          device: str, seed: int, verbose: bool, no_performance_warnings: bool,
          show_performance_analysis: bool):
     """
-    SymQNet Molecular Optimization CLI - FIXED UNIVERSAL VERSION
+    SymQNet Molecular Optimization CLI
     
      support (any qubit count) with WORKING parameter extraction
      Fallback to 10-qubit-only mode if universal components unavailable
@@ -570,13 +568,13 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     
     # Display mode information
     if UNIVERSAL_MODE:
-        logger.info(" Universal SymQNet mode enabled (FIXED)")
-        logger.info(" Supports any qubit count ≥2 with optimal performance at 10 qubits")
+        logger.info(" Universal SymQNet mode enabled ")
+
     else:
         logger.info(" Fallback mode active")
         logger.info("  Supports exactly 10-qubit systems only")
     
-    # 🔧 FIXED: Handle model file paths gracefully
+    #  FIXED: Handle model file paths gracefully
     try:
         model_path, vae_path = ensure_model_files(model_path, vae_path)
         logger.info(f" Using model: {model_path}")
@@ -647,11 +645,11 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         logger.info(f"Loaded {hamiltonian_data['n_qubits']}-qubit Hamiltonian "
                    f"with {len(hamiltonian_data['pauli_terms'])} terms")
         
-        # 2. Run Parameter Estimation (Universal or Fallback) - FIXED VERSION
+        # 2. Run Parameter Estimation 
         performance_report = performance_estimator.estimate_performance(n_qubits)
         logger.info(f" Expected performance: {performance_report.performance_factor:.1%} of optimal")
         
-        logger.info(f" Running FIXED parameter estimation...")
+        logger.info(f" Running parameter estimation...")
         logger.info(f" Configuration: {shots} shots, {n_rollouts} rollouts, {max_steps} max steps")
         
         final_results = run_optimization_universal(
@@ -692,7 +690,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         print_summary(final_results, n_qubits, performance_report.performance_factor)
         
         # Final performance note
-        success_msg = " FIXED Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else " Molecular optimization completed successfully!"
+        success_msg = " Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else " Molecular optimization completed successfully!"
         logger.info(success_msg)
         
     except Exception as e:

@@ -93,10 +93,10 @@ class HamiltonianValidator:
         
         if n_qubits != SUPPORTED_QUBITS:
             self.errors.append(
-                f"❌ INCOMPATIBLE: SymQNet-MolOpt only supports {SUPPORTED_QUBITS}-qubit systems.\n"
+                f" INCOMPATIBLE: SymQNet-MolOpt only supports {SUPPORTED_QUBITS}-qubit systems.\n"
                 f"   Your Hamiltonian: {n_qubits} qubits\n"
                 f"   Required: {SUPPORTED_QUBITS} qubits\n\n"
-                f"💡 To fix this:\n"
+                f" To fix this:\n"
                 f"   • Map your system to {SUPPORTED_QUBITS} qubits using active space approximation\n"
                 f"   • Use Jordan-Wigner encoding with appropriate truncation\n"
                 f"   • Apply symmetry reduction techniques"
@@ -277,7 +277,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
     """
     
     if not quiet:
-        print("🔍 SymQNet-MolOpt Hamiltonian Validator")
+        print(" SymQNet-MolOpt Hamiltonian Validator")
         print("=" * 50)
     
     # Validate the file
@@ -290,7 +290,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
         print(f"📏 Size: {hamiltonian_file.stat().st_size / 1024:.1f} KB")
     
     if validator.errors:
-        print("\n❌ VALIDATION FAILED:")
+        print("\n VALIDATION FAILED:")
         for error in validator.errors:
             print(f"   {error}")
         
@@ -300,12 +300,12 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
         raise click.ClickException("Validation failed")
     
     if validator.warnings and not quiet:
-        print("\n⚠️  WARNINGS:")
+        print("\n  WARNINGS:")
         for warning in validator.warnings:
             print(f"   {warning}")
     
     if not quiet:
-        print(f"\n✅ VALIDATION PASSED:")
+        print(f"\n VALIDATION PASSED:")
         print(f"   Molecule: {data.get('molecule', 'unknown')}")
         print(f"   Qubits: {data['n_qubits']}")
         print(f"   Pauli terms: {len(data['pauli_terms'])}")
@@ -338,7 +338,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
     
     # Check if file exists
     if target_path.exists() and not force:
-        print(f"\n⚠️  File already exists: {target_path}")
+        print(f"\n  File already exists: {target_path}")
         if click.confirm("Overwrite?"):
             force = True
         else:
@@ -349,13 +349,13 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
         shutil.copy2(hamiltonian_file, target_path)
         
         if not quiet:
-            print(f"✅ Successfully added: {target_path}")
+            print(f" Successfully added: {target_path}")
             
             # Show usage instructions
-            print(f"\n🚀 USAGE:")
+            print(f"\n USAGE:")
             print(f"   symqnet-molopt --hamiltonian {target_path} --output results.json")
             
-            print(f"\n📋 QUICK COMMANDS:")
+            print(f"\n QUICK COMMANDS:")
             print(f"   # Quick test:")
             print(f"   symqnet-molopt --hamiltonian {target_path} --shots 256 --output quick_test.json")
             print(f"   ")
@@ -363,7 +363,7 @@ def main(hamiltonian_file: Path, output_name: str, to_examples: bool,
             print(f"   symqnet-molopt --hamiltonian {target_path} --shots 2048 --output research.json --n-rollouts 15")
             
         else:
-            print(f"✅ Added: {target_path}")
+            print(f" Added: {target_path}")
             
     except Exception as e:
         raise click.ClickException(f"Failed to copy file: {e}")

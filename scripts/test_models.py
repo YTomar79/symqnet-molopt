@@ -22,7 +22,7 @@ def print_test_header(title):
 
 def print_test_result(test_name, success, details=""):
     """Print test result"""
-    status = "✅ PASS" if success else "❌ FAIL"
+    status = " PASS" if success else " FAIL"
     print(f"{test_name:<40} | {status}")
     if details:
         print(f"    └─ {details}")

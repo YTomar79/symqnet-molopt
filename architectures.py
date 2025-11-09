@@ -1,6 +1,5 @@
 """
 Exact architectures used for training SymQNet and VAE.
-This file contains the IDENTICAL code used to train the models.
 """
 
 import torch
@@ -13,10 +12,6 @@ from collections import deque
 import gymnasium as gym
 from gym import spaces
 import random
-
-# =============================================================================
-# UTILITY FUNCTIONS - EXACT FROM YOUR CODE
-# =============================================================================
 
 def get_pauli_matrices():
     X = np.array([[0, 1], [1, 0]], dtype=complex)
@@ -109,7 +104,7 @@ def generate_measurement_pair(n_qubits, p_dep=0.02, gamma=0.01, lmbda=0.01, shot
     return m_noisy, m_ideal
 
 # =============================================================================
-# DATASET FOR VAE PRETRAINING - EXACT FROM YOUR CODE
+# DATASET FOR VAE PRETRAINING - EXACT FROM   CODE
 # =============================================================================
 
 class MeasurementDataset(Dataset):
@@ -127,9 +122,7 @@ class MeasurementDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-# =============================================================================
-# VARIATIONAL AUTOENCODER - EXACT FROM YOUR CODE
-# =============================================================================
+
 
 class VariationalAutoencoder(nn.Module):
     def __init__(self, M: int, L: int, hidden: int = 128):
@@ -182,7 +175,7 @@ class VariationalAutoencoder(nn.Module):
         return recon, mu, logvar, z
 
 # =============================================================================
-# GRAPH EMBED - EXACT FROM YOUR CODE
+# GRAPH EMBED - EXACT FROM   CODE
 # =============================================================================
 
 class GraphEmbed(nn.Module):
@@ -283,7 +276,7 @@ class GraphEmbed(nn.Module):
         return z_G.squeeze(0) if squeeze else z_G
 
 # =============================================================================
-# TEMPORAL CONTEXTUAL AGGREGATOR - EXACT FROM YOUR CODE
+# TEMPORAL CONTEXTUAL AGGREGATOR - EXACT FROM   CODE
 # =============================================================================
 
 class TemporalContextualAggregator(nn.Module):
@@ -375,7 +368,7 @@ class TemporalContextualAggregator(nn.Module):
         return c_t.squeeze(0) if squeeze else c_t
 
 # =============================================================================
-# POLICY VALUE HEAD - EXACT FROM YOUR CODE
+# POLICY VALUE HEAD - EXACT FROM   CODE
 # =============================================================================
 
 class PolicyValueHead(nn.Module):
@@ -469,7 +462,7 @@ class PolicyValueHead(nn.Module):
         return logp, ent, V
 
 # =============================================================================
-# FIXED SYMQNET WITH ESTIMATOR - EXACT FROM YOUR CODE
+# FIXED SYMQNET WITH ESTIMATOR - EXACT FROM   CODE
 # =============================================================================
 
 class FixedSymQNetWithEstimator(nn.Module):
@@ -557,7 +550,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         return dist, V, theta_hat
 
 # =============================================================================
-# SPINCHAIN ENVIRONMENT - EXACT FROM YOUR CODE
+# SPINCHAIN ENVIRONMENT - EXACT FROM   CODE
 # =============================================================================
 
 class SpinChainEnv(gym.Env):
@@ -720,7 +713,7 @@ class SpinChainEnv(gym.Env):
         return obs, reward, done, info
 
 # =============================================================================
-# KL DIVERGENCE UTILITY - FROM YOUR CODE
+# KL DIVERGENCE UTILITY - FROM   CODE
 # =============================================================================
 
 def kl_divergence(mu, log_sigma):
@@ -732,7 +725,7 @@ def kl_divergence(mu, log_sigma):
     return kl
 
 # =============================================================================
-# HELPER FUNCTIONS FOR TRAINING - FROM YOUR CODE
+# HELPER FUNCTIONS FOR TRAINING - FROM   CODE
 # =============================================================================
 
 def set_seed(seed: int):

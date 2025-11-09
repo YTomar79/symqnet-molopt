@@ -459,14 +459,10 @@ class PolicyValueHead(nn.Module):
         ent = dist.entropy()
         if self.D is not None:
             ent = ent.sum(-1)
-        return logp, ent, V
-
- 
-# FIXED SYMQNET WITH ESTIMATOR - EXACT  FROM THE CODE
- 
+        return logp, ent, V 
 
 class FixedSymQNetWithEstimator(nn.Module):
-    """Fixed SymQNet that properly integrates all 4 blocks with metadata"""
+    """SymQNet that should be able to properly integrate all 4 blocks with metadata"""
 
     def __init__(self, vae, n_qubits, L, edge_index, edge_attr, T, A, M_evo, K_gnn=2):
         super().__init__()

@@ -103,9 +103,9 @@ def generate_measurement_pair(n_qubits, p_dep=0.02, gamma=0.01, lmbda=0.01, shot
     m_noisy = shot_noise_sampling(exp_noisy, shots)
     return m_noisy, m_ideal
 
-# =============================================================================
-# DATASET FOR VAE PRETRAINING - EXACT FROM   CODE
-# =============================================================================
+ 
+# DATASET FOR VAE PRETRAINING - EXACT  FROM THE CODE
+ 
 
 class MeasurementDataset(Dataset):
     def __init__(self, n_qubits, num_samples):
@@ -174,9 +174,9 @@ class VariationalAutoencoder(nn.Module):
         recon = self.decode(z)
         return recon, mu, logvar, z
 
-# =============================================================================
-# GRAPH EMBED - EXACT FROM   CODE
-# =============================================================================
+ 
+# GRAPH EMBED - EXACT  FROM THE CODE
+ 
 
 class GraphEmbed(nn.Module):
     def __init__(self,
@@ -275,9 +275,9 @@ class GraphEmbed(nn.Module):
         z_G = real.mean(dim=1)
         return z_G.squeeze(0) if squeeze else z_G
 
-# =============================================================================
-# TEMPORAL CONTEXTUAL AGGREGATOR - EXACT FROM   CODE
-# =============================================================================
+ 
+# TEMPORAL CONTEXTUAL AGGREGATOR - EXACT  FROM THE CODE
+ 
 
 class TemporalContextualAggregator(nn.Module):
     def __init__(self, L: int, T: int = 4, num_heads: int = 2, dropout: float = 0.1):
@@ -367,9 +367,9 @@ class TemporalContextualAggregator(nn.Module):
 
         return c_t.squeeze(0) if squeeze else c_t
 
-# =============================================================================
-# POLICY VALUE HEAD - EXACT FROM   CODE
-# =============================================================================
+ 
+# POLICY VALUE HEAD - EXACT  FROM THE CODE
+ 
 
 class PolicyValueHead(nn.Module):
     def __init__(self, L: int, A: int = None, D: int = None):
@@ -461,9 +461,9 @@ class PolicyValueHead(nn.Module):
             ent = ent.sum(-1)
         return logp, ent, V
 
-# =============================================================================
-# FIXED SYMQNET WITH ESTIMATOR - EXACT FROM   CODE
-# =============================================================================
+ 
+# FIXED SYMQNET WITH ESTIMATOR - EXACT  FROM THE CODE
+ 
 
 class FixedSymQNetWithEstimator(nn.Module):
     """Fixed SymQNet that properly integrates all 4 blocks with metadata"""
@@ -549,9 +549,9 @@ class FixedSymQNetWithEstimator(nn.Module):
 
         return dist, V, theta_hat
 
-# =============================================================================
-# SPINCHAIN ENVIRONMENT - EXACT FROM   CODE
-# =============================================================================
+ 
+# SPINCHAIN ENVIRONMENT - EXACT  FROM THE CODE
+ 
 
 class SpinChainEnv(gym.Env):
     metadata = {"render.modes": []}
@@ -712,9 +712,9 @@ class SpinChainEnv(gym.Env):
         }
         return obs, reward, done, info
 
-# =============================================================================
-# KL DIVERGENCE UTILITY - FROM   CODE
-# =============================================================================
+ 
+# KL DIVERGENCE UTILITY -  FROM  THE CODE
+ 
 
 def kl_divergence(mu, log_sigma):
     """
@@ -724,9 +724,9 @@ def kl_divergence(mu, log_sigma):
     kl = 0.5 * torch.sum(sigma2 + mu**2 - 1 - log_sigma)
     return kl
 
-# =============================================================================
-# HELPER FUNCTIONS FOR TRAINING - FROM   CODE
-# =============================================================================
+ 
+# HELPER FUNCTIONS FOR TRAINING -  FROM THE CODE
+ 
 
 def set_seed(seed: int):
     random.seed(seed)

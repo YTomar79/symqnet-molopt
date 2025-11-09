@@ -143,7 +143,6 @@ class MeasurementSimulator:
             Dictionary with measurement results
         """
         
-        # 🔧 FIX: Input validation
         if not qubit_indices or not pauli_operators:
             raise ValueError("Must specify at least one qubit and operator")
         
@@ -181,7 +180,6 @@ class MeasurementSimulator:
         # Apply time evolution
         psi_t = U @ psi0
         
-        # 🔧 FIX: Perform proper joint or individual measurements
         if len(qubit_indices) == 1:
             # Single-qubit measurement
             measurement_ops = ['I'] * self.n_qubits

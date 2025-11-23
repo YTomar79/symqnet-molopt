@@ -1,6 +1,6 @@
 # SymQNet-MolOpt: Hamiltonian Parameter Estimation
 
-SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for spin-system models and ultimately much more efficient molecular optimization.
+SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for 1D and 2D molecular models and ultimately much more efficient molecular optimization.
 It is designed for sample-efficient optimization and reports confidence intervals for each parameter.
 
 ---

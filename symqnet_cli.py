@@ -6,6 +6,8 @@ Usage:
 """
 import click
 import json
+import random
+import secrets
 import torch
 import numpy as np
 from pathlib import Path
@@ -534,8 +536,8 @@ def get_recommended_params_for_system(n_qubits: int,
               help='Compute device (default: auto)')
 @click.option('--seed', 
               type=int,
-              default=42,
-              help='Random seed for reproducibility')
+              default=None,
+              help='Random seed for reproducibility (default: None for randomized runs)')
 @click.option('--verbose', '-V',
               is_flag=True,
               help='Enable verbose logging')
@@ -547,7 +549,7 @@ def get_recommended_params_for_system(n_qubits: int,
               help='Show detailed performance analysis')
 def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path], 
          vae_path: Optional[Path], max_steps: int, n_rollouts: int, confidence: float,
-         device: str, seed: int, verbose: bool, no_performance_warnings: bool,
+         device: str, seed: Optional[int], verbose: bool, no_performance_warnings: bool,
          show_performance_analysis: bool):
     """
     SymQNet Molecular Optimization CLI
@@ -605,8 +607,15 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     logger.info(f"Using device: {device}")
     
     # Set random seeds
-    torch.manual_seed(seed)
+    if seed is None:
+        seed = secrets.randbits(32)
+        logger.info(f"No seed provided. Generated random seed: {seed}")
+
+    random.seed(seed)
     np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     
     # Initialize performance estimator
     performance_estimator = PerformanceEstimator(optimal_qubits=10)

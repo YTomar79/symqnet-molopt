@@ -12,6 +12,7 @@ from collections import deque
 import gymnasium as gym
 from gym import spaces
 import random
+from dataclasses import dataclass
 
 def get_pauli_matrices():
     X = np.array([[0, 1], [1, 0]], dtype=complex)
@@ -280,98 +281,92 @@ class GraphEmbed(nn.Module):
  
 
 class TemporalContextualAggregator(nn.Module):
-    def __init__(self, L: int, T: int = 4, num_heads: int = 2, dropout: float = 0.1):
+    def __init__(self, L: int, T: int = 4, num_heads: int = 2, dropout: float = 0.1, n_layers: int = 2):
         """
-        Block 3: Temporal & Contextual Feature Aggregator for SymQNet.
+        Block 3: Transformer-based Temporal & Contextual Feature Aggregator.
+
+        - Uses a causal TransformerEncoder so the agent can attend to informative past measurements.
+        - Keeps the "embed_dim divisible by num_heads" safety fix via an attn_dim projection.
         """
         super().__init__()
-        self.L = L
-        self.T = T
-        if num_heads is None or num_heads <= 0:
-            raise ValueError("num_heads must be a positive integer that divides L.")
-        if L % num_heads != 0:
-            raise ValueError(
-                f"num_heads ({num_heads}) must divide L ({L}) for multi-head attention."
-            )
+        self.L = int(L)
+        self.T = int(T)
+        self.num_heads = int(num_heads)
 
-        # Causal TCN layers
-        self.conv1 = nn.Conv1d(L, L, kernel_size=2, dilation=1, padding=0)
-        self.ln1   = nn.LayerNorm(L)
-        self.drop1 = nn.Dropout(dropout)
+        # ---- Attention dimension fix ----
+        self.attn_dim = ((self.L + self.num_heads - 1) // self.num_heads) * self.num_heads
 
-        self.conv2 = nn.Conv1d(L, L, kernel_size=2, dilation=2, padding=0)
-        self.ln2   = nn.LayerNorm(L)
-        self.drop2 = nn.Dropout(dropout)
+        if self.attn_dim != self.L:
+            self.pre = nn.Linear(self.L, self.attn_dim, bias=False)
+            self.post = nn.Linear(self.attn_dim, self.L, bias=False)
+        else:
+            self.pre = nn.Identity()
+            self.post = nn.Identity()
 
-        # Multi‐head self‐attention
-        self.attn = nn.MultiheadAttention(
-            embed_dim=L,
-            num_heads=num_heads,
-            batch_first=True,
+        # Learnable positional embedding (fixed horizon T)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.T, self.attn_dim))
+
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=self.attn_dim,
+            nhead=self.num_heads,
+            dim_feedforward=4 * self.attn_dim,
             dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
         )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=int(n_layers))
 
-        # Final projection
         self.out = nn.Sequential(
-            nn.Linear(L, L),
-            nn.LayerNorm(L),
+            nn.Linear(self.L, self.L),
+            nn.LayerNorm(self.L),
             nn.Dropout(dropout),
         )
 
-        # Initialize weights
+        # Init linears
         for m in self.modules():
-            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv1d):
+            if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
     def forward(self, zG_buffer: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-          zG_buffer: [T, L] or [B, T, L] tensor of past graph embeddings.
-        Returns:
-          c_t: [L] or [B, L] contextual embedding.
+        zG_buffer: [T, L] or [B, T, L]
+        returns:   [L] or [B, L]
         """
-        # -- ensure batch dimension --
         if zG_buffer.dim() == 2:
-            x = zG_buffer.unsqueeze(0)
+            x = zG_buffer.unsqueeze(0)  # [1, T, L]
             squeeze = True
         elif zG_buffer.dim() == 3:
-            x = zG_buffer
+            x = zG_buffer               # [B, T, L]
             squeeze = False
         else:
             raise ValueError("zG_buffer must be [T,L] or [B,T,L]")
 
-        B, T, L = x.shape
-        assert L == self.L, f"Expected L={self.L}, got {L}"
+        B, T_in, L_in = x.shape
+        if L_in != self.L:
+            raise ValueError(f"Expected last dim L={self.L}, got {L_in}")
 
-        # -- TCN Layer 1 (dilation=1, causal) --
-        x1 = x.transpose(1, 2)
-        x1 = F.pad(x1, (1, 0))
-        x1 = self.conv1(x1)
-        x1 = F.relu(x1).transpose(1, 2)
-        x1 = self.ln1(x1)
-        x1 = self.drop1(x1)
+        # Ensure length exactly self.T (pad left with zeros or take last T)
+        if T_in < self.T:
+            pad = torch.zeros(B, self.T - T_in, self.L, device=x.device, dtype=x.dtype)
+            x = torch.cat([pad, x], dim=1)
+        elif T_in > self.T:
+            x = x[:, -self.T:, :]
 
-        # -- TCN Layer 2 (dilation=2, causal) --
-        x2 = x1.transpose(1, 2)
-        x2 = F.pad(x2, (2, 0))
-        x2 = self.conv2(x2)
-        x2 = F.relu(x2).transpose(1, 2)
-        x2 = self.ln2(x2)
-        x2 = self.drop2(x2)
+        # Project to attn_dim + add pos emb
+        h = self.pre(x)  # [B, T, attn_dim]
+        h = h + self.pos_emb[:, : h.size(1), :]
 
-        # Residual skip
-        U = x1 + x2
+        # Causal mask (prevent attending to future)
+        T_use = h.size(1)
+        mask = torch.triu(torch.full((T_use, T_use), float("-inf"), device=h.device), diagonal=1)
 
-        # -- Multi-Head Self-Attention Over Time --
-        O, _ = self.attn(U, U, U)
-
-        # take the last time step
-        o_t = O[:, -1, :]
-
-        # final projection
-        c_t = self.out(o_t)
+        h = self.encoder(h, mask=mask)   # [B, T, attn_dim]
+        o_t = h[:, -1, :]                # [B, attn_dim]
+        o_t = self.post(o_t)             # [B, L]
+        c_t = self.out(o_t)              # [B, L]
 
         return c_t.squeeze(0) if squeeze else c_t
 
@@ -469,6 +464,49 @@ class PolicyValueHead(nn.Module):
             ent = ent.sum(-1)
         return logp, ent, V 
 
+
+@dataclass(frozen=True)
+class MetadataLayout:
+    n_qubits: int
+    M_evo: int
+    theta_dim: int
+    base: int
+    theta_slot0: int
+    cov_slot0: int
+    cov_feat_dim: int
+    fisher_slot0: int
+    fisher_feat_dim: int
+    shots_slot: int
+    meta_dim: int
+
+    @classmethod
+    def from_problem(cls, n_qubits: int, M_evo: int) -> "MetadataLayout":
+        base = n_qubits + 3 + M_evo
+        theta_dim = 2 * n_qubits - 1
+        theta_slot0 = base
+        cov_slot0 = theta_slot0 + theta_dim
+        cov_feat_dim = theta_dim + 8
+        fisher_slot0 = cov_slot0 + cov_feat_dim
+        fisher_feat_dim = theta_dim
+        shots_slot = fisher_slot0 + fisher_feat_dim
+        meta_dim = shots_slot + 1
+        return cls(
+            n_qubits=n_qubits,
+            M_evo=M_evo,
+            theta_dim=theta_dim,
+            base=base,
+            theta_slot0=theta_slot0,
+            cov_slot0=cov_slot0,
+            cov_feat_dim=cov_feat_dim,
+            fisher_slot0=fisher_slot0,
+            fisher_feat_dim=fisher_feat_dim,
+            shots_slot=shots_slot,
+            meta_dim=meta_dim,
+        )
+
+    def empty(self, device=None, dtype=None) -> torch.Tensor:
+        return torch.zeros(self.meta_dim, device=device, dtype=dtype)
+
 class FixedSymQNetWithEstimator(nn.Module):
     """SymQNet that should be able to properly integrate all 4 blocks with metadata"""
 
@@ -482,9 +520,17 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.M_evo = M_evo
 
         # Metadata dimensions
+        self.metadata_layout = MetadataLayout.from_problem(n_qubits, M_evo)
         if meta_dim is None:
-            meta_dim = n_qubits + 3 + M_evo
+            meta_dim = self.metadata_layout.meta_dim
         self.meta_dim = meta_dim
+        self.theta_dim = self.metadata_layout.theta_dim
+        self.theta_slot0 = self.metadata_layout.theta_slot0
+        self.cov_slot0 = self.metadata_layout.cov_slot0
+        self.cov_feat_dim = self.metadata_layout.cov_feat_dim
+        self.fisher_slot0 = self.metadata_layout.fisher_slot0
+        self.fisher_feat_dim = self.metadata_layout.fisher_feat_dim
+        self.shots_slot = self.metadata_layout.shots_slot
 
         # Block 1: Graph embedding (operates on latent + metadata)
         self.graph_embed = GraphEmbed(
@@ -501,15 +547,6 @@ class FixedSymQNetWithEstimator(nn.Module):
 
         # Block 3: Policy-Value head
         self.policy_value = PolicyValueHead(L + self.meta_dim, A)
-
-        # Block 4: Parameter estimator
-        self.estimator = nn.Sequential(
-            nn.Linear(L + self.meta_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 2 * n_qubits - 1)  # J + h parameters
-        )
 
         # Ring buffer for temporal context
         self.zG_history = []
@@ -550,10 +587,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         # Block 4a: Policy and Value
         dist, V = self.policy_value(c_t)
 
-        # Block 4b: Parameter estimation
-        theta_hat = self.estimator(c_t)
-
-        return dist, V, theta_hat
+        return dist, V
 
  
 # SPINCHAIN ENVIRONMENT - EXACT  FROM THE CODE

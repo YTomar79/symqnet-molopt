@@ -492,7 +492,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.M_evo = M_evo
 
         # Metadata dimensions
-        self.meta_dim = n_qubits + 3 + M_evo
+        self.meta_dim = n_qubits + 3 + M_evo + 1
 
         # Block 1: Graph embedding (operates on latent + metadata)
         self.graph_embed = GraphEmbed(

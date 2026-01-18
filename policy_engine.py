@@ -243,6 +243,9 @@ class PolicyEngine:
     def get_action(self, current_measurement: np.ndarray) -> Dict[str, Any]:
         """Get next measurement action from policy with EXACT metadata."""
         
+        if np.isnan(current_measurement).any():
+            current_measurement = np.nan_to_num(current_measurement, nan=0.0)
+        
         if len(current_measurement) != 10:
             padded_measurement = np.zeros(10)
             min_len = min(len(current_measurement), 10)

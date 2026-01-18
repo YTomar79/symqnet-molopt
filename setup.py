@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-setup.py for SymQNet-MolOpt (v3.1.0)
+setup.py for SymQNet-MolOpt (v3.1.1)
 """
 from pathlib import Path
 from setuptools import setup, find_packages
@@ -94,7 +94,7 @@ long_description = README.read_text(encoding="utf-8") if README.exists() else ""
 
 setup(
     name="symqnet-molopt",
-    version="3.1.0",
+    version="3.1.1",
     description="SymQNet Molecular Optimization via Hamiltonian Estimation",
     long_description=long_description,
     long_description_content_type="text/markdown",

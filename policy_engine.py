@@ -69,19 +69,41 @@ class PolicyEngine:
         logger.info(f"🔍 Keys: {list(state_dict.keys())[:10]}...")
         
         #  PARAMETERS
-        n_qubits = 10
-        T = 10
-        M_evo = 5
-        A = n_qubits * 3 * M_evo  # 150 actions
+        self.n_qubits = 10
+        self.T = 10
+        self.M_evo = 5
+        self.A = self.n_qubits * 3 * self.M_evo  # 150 actions
+
+        inferred_m_evo = self._infer_m_evo(state_dict, self.n_qubits)
+        if inferred_m_evo is not None and inferred_m_evo != self.M_evo:
+            logger.info(
+                "🔧 Overriding M_evo from checkpoint: %s -> %s",
+                self.M_evo,
+                inferred_m_evo,
+            )
+            self.M_evo = inferred_m_evo
+            self.A = self.n_qubits * 3 * self.M_evo
+
+        default_meta_dim = self.n_qubits + 3 + self.M_evo + 1
+        self.meta_dim = self._infer_meta_dim(state_dict, base_latent_dim=64, default_meta_dim=default_meta_dim)
+        self.include_shots = self.meta_dim == default_meta_dim
+        if not self.include_shots and self.meta_dim == default_meta_dim - 1:
+            logger.info("🔧 Checkpoint metadata excludes shot conditioning.")
+        elif not self.include_shots and self.meta_dim != default_meta_dim - 1:
+            logger.warning(
+                "⚠️ Unrecognized metadata size (%s); proceeding with include_shots=%s",
+                self.meta_dim,
+                self.include_shots,
+            )
         
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
         if is_simple_estimator:
             logger.info("🎯 Detected simple estimator-only model")
-            self._create_minimal_model(state_dict, n_qubits, M_evo, A)
+            self._create_minimal_model(state_dict, self.n_qubits, self.M_evo, self.A, self.meta_dim)
         else:
             logger.info("🎯 Detected full trained model")
-            self._create_full_model(state_dict, n_qubits, T, A, M_evo)
+            self._create_full_model(state_dict, self.n_qubits, self.T, self.A, self.M_evo, self.meta_dim)
         
         self.symqnet.eval()
         logger.info(" Models loaded with EXACT architecture match")
@@ -108,8 +130,62 @@ class PolicyEngine:
         )
         
         return is_simple
+
+    def _infer_m_evo(self, state_dict, n_qubits: int) -> Optional[int]:
+        """Infer M_evo from policy head weights when present."""
+        action_dim = None
+        if 'policy_value.policy_fc.weight' in state_dict:
+            action_dim = state_dict['policy_value.policy_fc.weight'].shape[0]
+        elif 'policy_value.policy_fc.bias' in state_dict:
+            action_dim = state_dict['policy_value.policy_fc.bias'].shape[0]
+
+        if action_dim is None:
+            return None
+
+        denom = n_qubits * 3
+        if action_dim % denom != 0:
+            logger.warning(
+                "⚠️ Cannot infer M_evo: action_dim=%s not divisible by %s",
+                action_dim,
+                denom,
+            )
+            return None
+
+        return int(action_dim // denom)
+
+    def _infer_meta_dim(self, state_dict, base_latent_dim: int, default_meta_dim: int) -> int:
+        """Infer metadata dimension from checkpoint shapes."""
+        embed_dim = None
+        candidates = [
+            ("temp_agg.conv1.weight", lambda w: w.shape[0]),
+            ("graph_embed.phi_e_layers.0.0.weight", lambda w: w.shape[0]),
+            ("policy_value.shared_fc.weight", lambda w: w.shape[1]),
+            ("estimator.0.weight", lambda w: w.shape[1]),
+            ("estimator.weight", lambda w: w.shape[1]),
+        ]
+
+        for key, extractor in candidates:
+            if key in state_dict:
+                embed_dim = int(extractor(state_dict[key]))
+                logger.info("🔍 Inferred embedding dim from %s: %s", key, embed_dim)
+                break
+
+        if embed_dim is None:
+            logger.warning("⚠️ Unable to infer embedding dim; using default metadata size.")
+            return default_meta_dim
+
+        meta_dim = embed_dim - base_latent_dim
+        if meta_dim <= 0:
+            logger.warning(
+                "⚠️ Invalid inferred metadata size (%s); using default %s.",
+                meta_dim,
+                default_meta_dim,
+            )
+            return default_meta_dim
+
+        return meta_dim
     
-    def _create_minimal_model(self, state_dict, n_qubits, M_evo, A):
+    def _create_minimal_model(self, state_dict, n_qubits, M_evo, A, meta_dim):
         """Create minimal model matching training's estimator architecture."""
         
         estimator_keys = [key for key in state_dict.keys() if 'estimator' in key]
@@ -117,14 +193,14 @@ class PolicyEngine:
                               for key in estimator_keys)
         
         class MinimalSymQNet(nn.Module):
-            def __init__(self, vae, n_qubits, device, is_mlp):
+            def __init__(self, vae, n_qubits, device, is_mlp, meta_dim):
                 super().__init__()
                 self.vae = vae
                 self.device = device
                 self.n_qubits = n_qubits
                 
-                input_dim = 64 + 19  # VAE + metadata = 83
-                output_dim = 2 * n_qubits - 1  # 19 parameters
+                input_dim = 64 + meta_dim  # VAE + metadata
+                output_dim = 2 * n_qubits - 1  # J + h parameters
                 
                 if is_mlp:
                     self.estimator = nn.Sequential(
@@ -143,7 +219,7 @@ class PolicyEngine:
                 if obs.dim() == 1:
                     obs = obs.unsqueeze(0)  # [10] -> [1, 10]
                 if metadata.dim() == 1:
-                    metadata = metadata.unsqueeze(0)  # [19] -> [1, 19]
+                    metadata = metadata.unsqueeze(0)  # [meta] -> [1, meta]
                 
                 # VAE encoding
                 with torch.no_grad():
@@ -155,13 +231,13 @@ class PolicyEngine:
                     )  # [1, 64]
                 
                 # Concatenate with metadata
-                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, 83]
+                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, L + meta]
                 
                 # Estimate parameters
-                theta_hat = self.estimator(z_with_meta)  # [1, 19]
+                theta_hat = self.estimator(z_with_meta)  # [1, 2*n_qubits-1]
                 
 
-                theta_hat = theta_hat.squeeze(0)  # [1, 19] -> [19]
+                theta_hat = theta_hat.squeeze(0)  # [1, 2*n_qubits-1] -> [2*n_qubits-1]
                 
                 # Create dummy policy outputs
                 action_probs = torch.ones(A, device=self.device) / A
@@ -173,7 +249,13 @@ class PolicyEngine:
             def reset_buffer(self):
                 self.step_count = 0
         
-        self.symqnet = MinimalSymQNet(self.vae, n_qubits, self.device, is_mlp_estimator).to(self.device)
+        self.symqnet = MinimalSymQNet(
+            self.vae,
+            n_qubits,
+            self.device,
+            is_mlp_estimator,
+            meta_dim,
+        ).to(self.device)
         self._load_estimator_weights(state_dict, is_mlp_estimator)
     
     def _load_estimator_weights(self, state_dict, is_mlp):
@@ -197,7 +279,7 @@ class PolicyEngine:
             self.symqnet.estimator.load_state_dict(estimator_state, strict=True)
             logger.info(" Estimator weights loaded successfully")
             
-            test_input = torch.randn(1, 83, device=self.device)
+            test_input = torch.randn(1, 64 + self.meta_dim, device=self.device)
             with torch.no_grad():
                 test_output = self.symqnet.estimator(test_input)
                 logger.info(f" Estimator test output shape: {test_output.shape}")
@@ -207,7 +289,7 @@ class PolicyEngine:
             logger.warning(f" Estimator loading issue: {e}")
             self.symqnet.estimator.load_state_dict(estimator_state, strict=False)
     
-    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo):
+    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim):
         """Create full model matching EXACT training architecture."""
         
         # EXACT graph connectivity from training
@@ -218,13 +300,14 @@ class PolicyEngine:
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=64,  # BASE VAE dimension, internal arch adds 19 to make 83
+            L=64,  # BASE VAE dimension, internal arch adds metadata
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
             A=A,
             M_evo=M_evo,
-            K_gnn=2
+            K_gnn=2,
+            meta_dim=meta_dim,
         ).to(self.device)
         
         # Load with architecture matching
@@ -265,14 +348,14 @@ class PolicyEngine:
         if np.isnan(current_measurement).any():
             current_measurement = np.nan_to_num(current_measurement, nan=0.0)
         
-        if len(current_measurement) != 10:
-            padded_measurement = np.zeros(10)
-            min_len = min(len(current_measurement), 10)
+        if len(current_measurement) != self.n_qubits:
+            padded_measurement = np.zeros(self.n_qubits)
+            min_len = min(len(current_measurement), self.n_qubits)
             padded_measurement[:min_len] = current_measurement[:min_len]
             current_measurement = padded_measurement
         
-        obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)  # [10]
-        metadata = self._create_metadata(self.last_action)  # [19]
+        obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)  # [n_qubits]
+        metadata = self._create_metadata(self.last_action)  # [meta_dim]
         
         logger.debug(f" Input shapes: obs={obs_tensor.shape}, metadata={metadata.shape}")
         
@@ -283,11 +366,11 @@ class PolicyEngine:
 
                 if theta_estimate is None:
                     logger.error(" theta_estimate is None!")
-                    theta_estimate = torch.zeros(19, device=self.device)
+                    theta_estimate = torch.zeros(2 * self.n_qubits - 1, device=self.device)
                 
                 if theta_estimate.numel() == 0:
                     logger.error(" theta_estimate is empty!")
-                    theta_estimate = torch.zeros(19, device=self.device)
+                    theta_estimate = torch.zeros(2 * self.n_qubits - 1, device=self.device)
                 
                 # Convert to numpy and validate
                 theta_np = theta_estimate.detach().cpu().numpy()
@@ -295,12 +378,13 @@ class PolicyEngine:
                 if theta_np.ndim > 1:
                     theta_np = np.squeeze(theta_np)
 
-                if theta_np.size == 19 and theta_np.shape != (19,):
-                    theta_np = theta_np.reshape(19)
+                expected_dim = 2 * self.n_qubits - 1
+                if theta_np.size == expected_dim and theta_np.shape != (expected_dim,):
+                    theta_np = theta_np.reshape(expected_dim)
 
-                if theta_np.shape != (19,):
+                if theta_np.shape != (expected_dim,):
                     logger.error(f" Wrong parameter shape: {theta_np.shape} (size={theta_np.size})")
-                    theta_np = np.zeros(19)
+                    theta_np = np.zeros(expected_dim)
                 
                 if np.allclose(theta_np, 0, atol=1e-10):
                     logger.warning(f" All parameters are zero at step {self.step_count}")
@@ -340,11 +424,17 @@ class PolicyEngine:
     
     def _create_metadata(self, action_info: Optional[Dict[str, Any]]) -> torch.Tensor:
         """Create metadata tensor based on the most recent action."""
-        n_qubits = 10
-        M_evo = 5
-        meta_dim = n_qubits + 3 + M_evo + 1  # 19
-        
-        metadata = torch.zeros(meta_dim, device=self.device)
+        n_qubits = self.n_qubits
+        M_evo = self.M_evo
+        metadata = torch.zeros(self.meta_dim, device=self.device)
+        required_dim = n_qubits + 3 + M_evo
+        if metadata.numel() < required_dim:
+            logger.warning(
+                "⚠️ Metadata dim (%s) smaller than required (%s); returning zeros.",
+                metadata.numel(),
+                required_dim,
+            )
+            return metadata
         
         if action_info:
             qubits = action_info.get('qubits') or []
@@ -369,7 +459,8 @@ class PolicyEngine:
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0
 
-        metadata[-1] = self._normalize_shots()
+        if self.include_shots and metadata.numel() > (n_qubits + 3 + M_evo):
+            metadata[-1] = self._normalize_shots()
 
         return metadata
 
@@ -382,9 +473,9 @@ class PolicyEngine:
     
     def _decode_action(self, action_idx: int) -> Dict[str, Any]:
         """Decode integer action EXACTLY as in training."""
-        M_evo = 5
+        M_evo = self.M_evo
         
-        action_idx = max(0, min(action_idx, 149))
+        action_idx = max(0, min(action_idx, self.A - 1))
         
         time_idx = action_idx % M_evo
         action_idx //= M_evo
@@ -392,7 +483,7 @@ class PolicyEngine:
         basis_idx = action_idx % 3
         qubit_idx = action_idx // 3
         
-        qubit_idx = min(qubit_idx, 9)
+        qubit_idx = min(qubit_idx, self.n_qubits - 1)
         basis_idx = min(basis_idx, 2)
         time_idx = min(time_idx, M_evo - 1)
         
@@ -417,7 +508,7 @@ class PolicyEngine:
             return estimate
         else:
             logger.warning(" No parameter history, returning zeros")
-            return np.zeros(19)
+            return np.zeros(2 * self.n_qubits - 1)
     
     def has_converged(self, parameter_estimates: List[np.ndarray]) -> bool:
         """Check if parameter estimates have converged."""

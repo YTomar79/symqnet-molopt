@@ -255,6 +255,7 @@ class PolicyEngine:
         self.zero_theta_steps = 0
         self.convergence_threshold = 1e-4
         self.convergence_window = 5
+        self.last_action = None
         
         logger.debug(" Policy engine state reset")
     
@@ -271,7 +272,7 @@ class PolicyEngine:
             current_measurement = padded_measurement
         
         obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)  # [10]
-        metadata = self._create_metadata()  # [18]
+        metadata = self._create_metadata(self.last_action)  # [18]
         
         logger.debug(f" Input shapes: obs={obs_tensor.shape}, metadata={metadata.shape}")
         
@@ -314,6 +315,7 @@ class PolicyEngine:
                 # Generate action
                 action_idx = dist.sample().item()
                 action_info = self._decode_action(action_idx)
+                self.last_action = action_info
                 
         except Exception as e:
             if isinstance(e, InferenceError):
@@ -330,19 +332,33 @@ class PolicyEngine:
         self.step_count += 1
         return action_info
     
-    def _create_metadata(self) -> torch.Tensor:
-        """Create metadata tensor EXACTLY as in training."""
+    def _create_metadata(self, action_info: Optional[Dict[str, Any]]) -> torch.Tensor:
+        """Create metadata tensor based on the most recent action."""
         n_qubits = 10
         M_evo = 5
         meta_dim = n_qubits + 3 + M_evo  # 18
         
         metadata = torch.zeros(meta_dim, device=self.device)
         
-        if self.step_count > 0:
+        if action_info:
+            qubits = action_info.get('qubits') or []
+            basis_idx = action_info.get('basis_idx')
+            time_idx = action_info.get('time_idx')
+
+            if qubits:
+                qi = max(0, min(qubits[0], n_qubits - 1))
+                metadata[qi] = 1.0
+            if basis_idx is not None:
+                bi = max(0, min(basis_idx, 2))
+                metadata[n_qubits + bi] = 1.0
+            if time_idx is not None:
+                ti = max(0, min(time_idx, M_evo - 1))
+                metadata[n_qubits + 3 + ti] = 1.0
+        elif self.step_count > 0:
             qi = self.step_count % n_qubits
             bi = 2  # prefer Z measurements
             ti = self.step_count % M_evo
-            
+
             metadata[qi] = 1.0
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0

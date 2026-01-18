@@ -189,12 +189,13 @@ class MeasurementSimulator:
             # Joint measurement
             pauli_indices = list(zip(qubit_indices, pauli_operators))
             joint_expectation = self._measure_state_joint(psi_t, pauli_indices)
-            # Return as array with joint result in first position, rest zeros
-            expectation_values = np.zeros(self.n_qubits)
+            # Return as array with joint result in first position, rest unmeasured
+            expectation_values = np.full(self.n_qubits, np.nan)
             expectation_values[0] = joint_expectation
         
         # Add shot noise
         noisy_expectations = self._add_shot_noise(expectation_values)
+        measurement_mask = ~np.isnan(expectation_values)
         
         return {
             'qubit_indices': qubit_indices,
@@ -202,6 +203,7 @@ class MeasurementSimulator:
             'evolution_time': evolution_time,
             'expectation_values': noisy_expectations,
             'ideal_expectation_values': expectation_values,
+            'measurement_mask': measurement_mask,
             'shots_used': self.shots,
             'measurement_type': 'joint' if len(qubit_indices) > 1 else 'individual'
         }
@@ -214,7 +216,7 @@ class MeasurementSimulator:
         
         for i, op in enumerate(measurement_ops):
             if op == 'I':
-                expectations.append(1.0)  # Identity always gives 1
+                expectations.append(np.nan)  # Unmeasured qubit
                 continue
             
             # Build single-qubit measurement operator
@@ -245,12 +247,11 @@ class MeasurementSimulator:
     def _add_shot_noise(self, expectations: np.ndarray) -> np.ndarray:
         """Add finite shot noise to expectation values."""
         
-        noisy_expectations = np.zeros_like(expectations)
+        noisy_expectations = np.full_like(expectations, np.nan, dtype=float)
         
         for i, exp_val in enumerate(expectations):
-            # Skip if expectation is zero (unused measurement)
-            if abs(exp_val) < 1e-10:
-                noisy_expectations[i] = 0.0
+            # Skip if measurement is not taken
+            if np.isnan(exp_val):
                 continue
             
             # Clamp expectation value to valid range

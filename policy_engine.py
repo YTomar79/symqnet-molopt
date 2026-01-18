@@ -84,12 +84,12 @@ class PolicyEngine:
             self.M_evo = inferred_m_evo
             self.A = self.n_qubits * 3 * self.M_evo
 
-        default_meta_dim = self.n_qubits + 3 + self.M_evo + 1
+        default_meta_dim = self.n_qubits + 3 + self.M_evo
         self.meta_dim = self._infer_meta_dim(state_dict, base_latent_dim=64, default_meta_dim=default_meta_dim)
-        self.include_shots = self.meta_dim == default_meta_dim
-        if not self.include_shots and self.meta_dim == default_meta_dim - 1:
+        self.include_shots = self.meta_dim == default_meta_dim + 1
+        if not self.include_shots and self.meta_dim == default_meta_dim:
             logger.info("🔧 Checkpoint metadata excludes shot conditioning.")
-        elif not self.include_shots and self.meta_dim != default_meta_dim - 1:
+        elif not self.include_shots and self.meta_dim != default_meta_dim:
             logger.warning(
                 "⚠️ Unrecognized metadata size (%s); proceeding with include_shots=%s",
                 self.meta_dim,
@@ -224,11 +224,7 @@ class PolicyEngine:
                 # VAE encoding
                 with torch.no_grad():
                     mu_z, logvar_z = self.vae.encode(obs)
-                    z = self.vae.sample_latent(
-                        mu_z,
-                        logvar_z,
-                        deterministic=deterministic_inference or not self.training,
-                    )  # [1, 64]
+                    z = self.vae.reparameterize(mu_z, logvar_z)  # [1, 64]
                 
                 # Concatenate with metadata
                 z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, L + meta]
@@ -459,7 +455,7 @@ class PolicyEngine:
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0
 
-        if self.include_shots and metadata.numel() > (n_qubits + 3 + M_evo):
+        if self.include_shots and metadata.numel() > required_dim:
             metadata[-1] = self._normalize_shots()
 
         return metadata

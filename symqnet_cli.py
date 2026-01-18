@@ -406,7 +406,8 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
     
     
 
-def print_summary(results: Dict, n_qubits: int, performance_factor: float):
+def print_summary(results: Dict, n_qubits: int, performance_factor: float,
+                  requested_shots: int, shots_used: int):
     """Print a formatted summary of results with performance context."""
     
 
@@ -414,6 +415,7 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float):
 
     
     print(f" System: {n_qubits} qubits")
+    print(f" Shots: requested={requested_shots}, used={shots_used}")
 
     
 
@@ -630,6 +632,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         print_performance_info(n_qubits, performance_estimator)
     
     # Get recommended parameters based on system size
+    requested_shots = shots
     param_recommendations = get_recommended_params_for_system(
         n_qubits, shots, n_rollouts, performance_estimator
     )
@@ -642,6 +645,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     if param_recommendations['n_rollouts'] > n_rollouts:
         logger.info(f"Increasing rollouts: {n_rollouts} → {param_recommendations['n_rollouts']} (recommended for {n_qubits} qubits)")
         n_rollouts = param_recommendations['n_rollouts']
+    shots_used = shots
+    logger.info(f"Shots summary: requested={requested_shots}, used={shots_used}")
     
     try:
         # Validate inputs
@@ -679,6 +684,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
             hamiltonian_data=hamiltonian_data,
             config={
                 'shots': shots,
+                'requested_shots': requested_shots,
+                'shots_used': shots_used,
                 'max_steps': max_steps,
                 'n_rollouts': n_rollouts,
                 'confidence': confidence,
@@ -696,7 +703,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         )
         
         # Print summary with performance context
-        print_summary(final_results, n_qubits, performance_report.performance_factor)
+        print_summary(final_results, n_qubits, performance_report.performance_factor,
+                      requested_shots, shots_used)
         
         # Final performance note
         success_msg = " Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else " Molecular optimization completed successfully!"

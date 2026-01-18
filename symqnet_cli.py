@@ -291,7 +291,10 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
                     param_estimate = policy.get_parameter_estimate()
                     parameter_estimates.append(param_estimate)
                     
-                    current_measurement = measurement_result['expectation_values']
+                    measurement_mask = measurement_result['measurement_mask']
+                    current_measurement[measurement_mask] = (
+                        measurement_result['expectation_values'][measurement_mask]
+                    )
                     
                     # Debug: Check if we're getting real parameters
                     if step == 0:
@@ -390,7 +393,10 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
                     measurements.append(measurement_result)
                     param_estimate = policy.get_parameter_estimate()
                     parameter_estimates.append(param_estimate)
-                    current_measurement = measurement_result['expectation_values']
+                    measurement_mask = measurement_result['measurement_mask']
+                    current_measurement[measurement_mask] = (
+                        measurement_result['expectation_values'][measurement_mask]
+                    )
                     
                     if step > 5 and policy.has_converged(parameter_estimates):
                         break

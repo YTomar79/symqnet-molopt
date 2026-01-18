@@ -235,6 +235,7 @@ class PolicyEngine:
             self.symqnet.reset_buffer()
         self.step_count = 0
         self.parameter_history = []
+        self.zero_theta_steps = 0
         self.convergence_threshold = 1e-4
         self.convergence_window = 5
         
@@ -276,8 +277,17 @@ class PolicyEngine:
                 
                 if np.allclose(theta_np, 0, atol=1e-10):
                     logger.warning(f" All parameters are zero at step {self.step_count}")
+                    self.zero_theta_steps += 1
+                    if self.zero_theta_steps >= 3:
+                        raise RuntimeError(
+                            "theta_estimate has been all zeros for multiple steps. "
+                            "This indicates inference is broken (model load mismatch, "
+                            "wrong input shape, or corrupted weights). The MAE is not "
+                            "expected to vary with shots until inference is fixed."
+                        )
                 else:
                     logger.debug(f" Got non-zero parameters: range [{theta_np.min():.6f}, {theta_np.max():.6f}]")
+                    self.zero_theta_steps = 0
                 
                 self.parameter_history.append(theta_np)
                 
@@ -286,6 +296,8 @@ class PolicyEngine:
                 action_info = self._decode_action(action_idx)
                 
         except Exception as e:
+            if isinstance(e, RuntimeError) and "theta_estimate has been all zeros" in str(e):
+                raise
             logger.error(f" Error in get_action: {e}")
             # Fallback: use dummy parameters
             theta_np = np.zeros(19)

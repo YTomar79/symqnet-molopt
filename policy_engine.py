@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import logging
 
 
@@ -27,6 +27,9 @@ class InferenceError(RuntimeError):
 
 class PolicyEngine:
     """Integrates trained SymQNet for molecular Hamiltonian estimation."""
+
+    CHECKPOINT_FORMAT = "symqnet-ppo-v2"
+    CHECKPOINT_VERSION = 1
     
     def __init__(self, model_path: Path, vae_path: Path, device: torch.device, shots: Optional[int] = None):
         self.device = device
@@ -56,45 +59,23 @@ class PolicyEngine:
         for p in self.vae.parameters():
             p.requires_grad = False
         
-        #Inspect checkpoint to determine EXACT architecture
+        # Inspect checkpoint metadata to determine EXACT architecture
         checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
-        
-        # Get the actual state dict
-        if 'model_state_dict' in checkpoint:
-            state_dict = checkpoint['model_state_dict']
-        else:
-            state_dict = checkpoint
+        checkpoint_data = self._validate_checkpoint(checkpoint)
+        state_dict = checkpoint_data["model_state_dict"]
         
         logger.info(f"🔍 Checkpoint contains {len(state_dict)} parameters")
         logger.info(f"🔍 Keys: {list(state_dict.keys())[:10]}...")
         
-        #  PARAMETERS
-        self.n_qubits = 10
-        self.T = 10
-        self.M_evo = 5
+        #  PARAMETERS (explicit from checkpoint metadata)
+        self.n_qubits = self._coerce_positive_int(checkpoint_data["n_qubits"], "n_qubits")
+        self.T = self._coerce_positive_int(checkpoint_data["rollout_steps"], "rollout_steps")
+        self.M_evo = self._coerce_positive_int(checkpoint_data["M_evo"], "M_evo")
         self.A = self.n_qubits * 3 * self.M_evo  # 150 actions
-
-        inferred_m_evo = self._infer_m_evo(state_dict, self.n_qubits)
-        if inferred_m_evo is not None and inferred_m_evo != self.M_evo:
-            logger.info(
-                "🔧 Overriding M_evo from checkpoint: %s -> %s",
-                self.M_evo,
-                inferred_m_evo,
-            )
-            self.M_evo = inferred_m_evo
-            self.A = self.n_qubits * 3 * self.M_evo
-
-        default_meta_dim = self.n_qubits + 3 + self.M_evo
-        self.meta_dim = self._infer_meta_dim(state_dict, base_latent_dim=64, default_meta_dim=default_meta_dim)
-        self.include_shots = self.meta_dim == default_meta_dim + 1
-        if not self.include_shots and self.meta_dim == default_meta_dim:
-            logger.info("🔧 Checkpoint metadata excludes shot conditioning.")
-        elif not self.include_shots and self.meta_dim != default_meta_dim:
-            logger.warning(
-                "⚠️ Unrecognized metadata size (%s); proceeding with include_shots=%s",
-                self.meta_dim,
-                self.include_shots,
-            )
+        self.meta_dim = self._coerce_positive_int(checkpoint_data["meta_dim"], "meta_dim")
+        self.shots_encoding = checkpoint_data["shots_encoding"]
+        self.include_shots = bool(self.shots_encoding)
+        logger.info("🔍 Metadata: meta_dim=%s, include_shots=%s", self.meta_dim, self.include_shots)
         
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
@@ -107,6 +88,75 @@ class PolicyEngine:
         
         self.symqnet.eval()
         logger.info(" Models loaded with EXACT architecture match")
+
+    def _validate_checkpoint(self, checkpoint: Any) -> Dict[str, Any]:
+        """Validate checkpoint schema and return normalized checkpoint data."""
+        if not isinstance(checkpoint, dict):
+            raise ValueError("Unsupported checkpoint format: expected dict-based checkpoint.")
+
+        if "model_state_dict" not in checkpoint:
+            legacy_message = (
+                "Legacy checkpoint detected (missing 'model_state_dict' and metadata). "
+                "Please re-export using a versioned checkpoint with explicit fields "
+                "(model_state_dict, meta_dim, shots_encoding, n_qubits, M_evo, rollout_steps)."
+            )
+            raise ValueError(legacy_message)
+
+        required_keys = {
+            "model_state_dict",
+            "meta_dim",
+            "shots_encoding",
+            "n_qubits",
+            "M_evo",
+            "rollout_steps",
+        }
+        missing = sorted(required_keys - checkpoint.keys())
+        if missing:
+            raise ValueError(f"Checkpoint missing required keys: {missing}")
+
+        has_format = "checkpoint_format" in checkpoint
+        has_version = "checkpoint_version" in checkpoint
+        if has_format != has_version:
+            raise ValueError(
+                "Checkpoint must include both 'checkpoint_format' and 'checkpoint_version'."
+            )
+        if has_format and has_version:
+            if checkpoint["checkpoint_format"] != self.CHECKPOINT_FORMAT:
+                raise ValueError(
+                    f"Unsupported checkpoint format: {checkpoint['checkpoint_format']}. "
+                    f"Expected '{self.CHECKPOINT_FORMAT}'."
+                )
+            if checkpoint["checkpoint_version"] != self.CHECKPOINT_VERSION:
+                raise ValueError(
+                    f"Unsupported checkpoint version: {checkpoint['checkpoint_version']}. "
+                    f"Expected {self.CHECKPOINT_VERSION}."
+                )
+        else:
+            logger.warning(
+                "⚠️ Legacy checkpoint without format/version; proceeding with validated metadata."
+            )
+
+        state_dict = checkpoint["model_state_dict"]
+        if not isinstance(state_dict, dict):
+            raise ValueError("Checkpoint 'model_state_dict' must be a state dict.")
+
+        shots_encoding = checkpoint["shots_encoding"]
+        if shots_encoding is not None and not isinstance(shots_encoding, dict):
+            raise ValueError("Checkpoint 'shots_encoding' must be a dict or None.")
+        if isinstance(shots_encoding, dict) and "type" not in shots_encoding:
+            raise ValueError("Checkpoint 'shots_encoding' dict must include a 'type' field.")
+
+        return checkpoint
+
+    def _coerce_positive_int(self, value: Any, name: str) -> int:
+        """Convert checkpoint metadata to positive int values."""
+        try:
+            int_value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Checkpoint field '{name}' must be an integer.") from exc
+        if int_value <= 0:
+            raise ValueError(f"Checkpoint field '{name}' must be > 0.")
+        return int_value
     
     def _detect_simple_estimator(self, state_dict):
         """Detect if this is a simple estimator or full model."""
@@ -131,60 +181,6 @@ class PolicyEngine:
         
         return is_simple
 
-    def _infer_m_evo(self, state_dict, n_qubits: int) -> Optional[int]:
-        """Infer M_evo from policy head weights when present."""
-        action_dim = None
-        if 'policy_value.policy_fc.weight' in state_dict:
-            action_dim = state_dict['policy_value.policy_fc.weight'].shape[0]
-        elif 'policy_value.policy_fc.bias' in state_dict:
-            action_dim = state_dict['policy_value.policy_fc.bias'].shape[0]
-
-        if action_dim is None:
-            return None
-
-        denom = n_qubits * 3
-        if action_dim % denom != 0:
-            logger.warning(
-                "⚠️ Cannot infer M_evo: action_dim=%s not divisible by %s",
-                action_dim,
-                denom,
-            )
-            return None
-
-        return int(action_dim // denom)
-
-    def _infer_meta_dim(self, state_dict, base_latent_dim: int, default_meta_dim: int) -> int:
-        """Infer metadata dimension from checkpoint shapes."""
-        embed_dim = None
-        candidates = [
-            ("temp_agg.conv1.weight", lambda w: w.shape[0]),
-            ("graph_embed.phi_e_layers.0.0.weight", lambda w: w.shape[0]),
-            ("policy_value.shared_fc.weight", lambda w: w.shape[1]),
-            ("estimator.0.weight", lambda w: w.shape[1]),
-            ("estimator.weight", lambda w: w.shape[1]),
-        ]
-
-        for key, extractor in candidates:
-            if key in state_dict:
-                embed_dim = int(extractor(state_dict[key]))
-                logger.info("🔍 Inferred embedding dim from %s: %s", key, embed_dim)
-                break
-
-        if embed_dim is None:
-            logger.warning("⚠️ Unable to infer embedding dim; using default metadata size.")
-            return default_meta_dim
-
-        meta_dim = embed_dim - base_latent_dim
-        if meta_dim <= 0:
-            logger.warning(
-                "⚠️ Invalid inferred metadata size (%s); using default %s.",
-                meta_dim,
-                default_meta_dim,
-            )
-            return default_meta_dim
-
-        return meta_dim
-    
     def _create_minimal_model(self, state_dict, n_qubits, M_evo, A, meta_dim):
         """Create minimal model matching training's estimator architecture."""
         

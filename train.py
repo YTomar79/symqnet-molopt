@@ -2075,6 +2075,8 @@ for update in range(1, episodes + 1):
             best_performance = avg_final_mse
             torch.save(
                 {
+                    "checkpoint_format": "symqnet-ppo-v2",
+                    "checkpoint_version": 1,
                     "update": update,
                     "model_state_dict": agent.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
@@ -2095,4 +2097,3 @@ for update in range(1, episodes + 1):
 print("✅ PPO v2 training completed!")
 print(f"Best mean-final-MSE achieved: {best_performance:.6f}")
 writer.close()
-

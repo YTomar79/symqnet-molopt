@@ -4,6 +4,40 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
+# Faster matmuls on Ampere+ (safe for this workload)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.set_float32_matmul_precision("high")
+
+@torch.no_grad()
+def mean_outcome_from_state_precomp(
+    psi: torch.Tensor,          # [..., dim] complex
+    flip_idx: torch.Tensor,     # [dim] int64
+    sign01: torch.Tensor,       # [dim] float (|0>->-1, |1>->+1)
+    phase: torch.Tensor,        # [dim] float (|0>:+1, |1>:-1)
+    basis_idx: int,             # 0=X, 1=Y, 2=Z
+) -> torch.Tensor:
+    """
+    Returns mean outcome in [-1,1] under YOUR convention:
+      computational |1> -> +1, |0> -> -1
+    which corresponds to -<Pauli> for X/Y/Z in the usual physics convention.
+    """
+    psi_flip = psi[..., flip_idx]
+
+    if basis_idx == 2:  # Z
+        probs = (psi.abs() ** 2).to(sign01.dtype)
+        return (probs * sign01).sum(dim=-1)
+
+    if basis_idx == 0:  # X
+        ex = (psi.conj() * psi_flip).sum(dim=-1).real
+        return -ex
+
+    if basis_idx == 1:  # Y
+        i_unit = torch.tensor(1j, device=psi.device, dtype=psi.dtype)
+        ey = (psi.conj() * (i_unit * phase) * psi_flip).sum(dim=-1).real
+        return -ey
+
+    raise ValueError("basis_idx must be 0(X), 1(Y), or 2(Z)")
+
 # Reuse noise and measurement generation from previous steps
 def get_pauli_matrices():
     X = np.array([[0, 1], [1, 0]], dtype=complex)
@@ -73,12 +107,10 @@ def compute_expectations(rho, n_qubits):
     return np.array(expectations)
 
 def shot_noise_sampling(expectations, shots=512):
-    noisy_meas = np.zeros_like(expectations)
-    for idx, exp_val in enumerate(expectations):
-        p_plus = (1 + exp_val) / 2
-        samples = np.where(np.random.rand(shots) < p_plus, 1, -1)
-        noisy_meas[idx] = np.mean(samples)
-    return noisy_meas
+    p_plus = 0.5 * (1.0 + expectations)
+    p_plus = np.clip(p_plus, 0.0, 1.0)
+    n_plus = np.random.binomial(shots, p_plus)
+    return (2.0 * n_plus - shots) / shots
 
 def generate_random_pure_state(n_qubits):
     dim = 2 ** n_qubits
@@ -102,17 +134,320 @@ class MeasurementDataset(Dataset):
     def __init__(self, n_qubits, num_samples):
         self.n_qubits = n_qubits
         self.num_samples = num_samples
-        self.data = []
-        for _ in range(num_samples):
-            m_noisy, m_ideal = generate_measurement_pair(n_qubits)
-            self.data.append((m_noisy.astype(np.float32), m_ideal.astype(np.float32)))
 
     def __len__(self):
         return self.num_samples
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        m_noisy, m_ideal = generate_measurement_pair(self.n_qubits)
+        return m_noisy.astype(np.float32), m_ideal.astype(np.float32)
 
+
+import math
+
+def covariance_to_features(cov: torch.Tensor, max_eigs: int = 8):
+    """
+    Converts covariance matrix to compact belief features.
+
+    Returns:
+      feat = [ log_diag , top_eigenvalues ]
+    """
+    diag = torch.log(torch.diag(cov) + 1e-8)
+
+    # Low-rank uncertainty structure
+    eigvals = torch.linalg.eigvalsh(cov)
+    topk = eigvals[-max_eigs:]
+
+    return torch.cat([diag, topk], dim=0)
+
+
+def gaussian_entropy_from_cov(cov: torch.Tensor, *, eps: float = 1e-9) -> torch.Tensor:
+    """
+    Differential entropy of N(·; 0, cov) in nats:
+      H = 0.5 * ( d*(1 + ln(2π)) + ln(det(cov)) )
+
+    Returns a scalar tensor (nats). Uses slogdet for stability.
+    """
+    d = int(cov.shape[0])
+    I = torch.eye(d, device=cov.device, dtype=cov.dtype)
+
+    C = cov + eps * I
+    sign, logdet = torch.linalg.slogdet(C)
+
+    # If numerical issues: add more jitter once
+    if (sign <= 0).any():
+        C = cov + 1e-6 * I
+        sign, logdet = torch.linalg.slogdet(C)
+
+    return 0.5 * (d * (1.0 + math.log(2.0 * math.pi)) + logdet)
+
+
+
+class SMCParticleFilter:
+    """
+    Sequential Monte Carlo filter over theta = [J_0..J_{N-2}, h_0..h_{N-1}] (dim = 2N-1).
+
+    Update uses an approximate likelihood for the observed mean outcome y in [-1,1]:
+      y ~ Normal(E(theta,a), (1 - E^2)/shots)
+    where E(theta,a) is the predicted mean outcome under the particle's Hamiltonian
+    and the chosen (qubit, basis, time_idx).
+    """
+
+    def __init__(
+        self,
+        env,
+        n_particles: int = 48,
+        ess_frac: float = 0.5,
+        roughen_frac: float = 0.02,
+        device=None,
+    ):
+        self.env = env
+        self.N = int(env.N)
+        self.theta_dim = 2 * self.N - 1
+        self.dim = 2 ** self.N
+        self.P = int(n_particles)
+        self.ess_threshold = float(ess_frac) * self.P
+        self.roughen_frac = float(roughen_frac)
+        self.device = device if device is not None else env.device
+
+        # Prior bounds (vectorized)
+        J_lo, J_hi = env.J_range
+        h_lo, h_hi = env.h_range
+        self.prior_low  = torch.tensor([J_lo] * (self.N - 1) + [h_lo] * self.N, device=self.device, dtype=torch.float32)
+        self.prior_high = torch.tensor([J_hi] * (self.N - 1) + [h_hi] * self.N, device=self.device, dtype=torch.float32)
+
+        # Precompute operator terms so building H(theta) is cheap:
+        # H(theta) = sum_i J_i ZZ_i + sum_i h_i X_i
+        self.ZZ_terms = []
+        for i in range(self.N - 1):
+            ops = [env.I] * self.N
+            ops[i] = env.Z
+            ops[i + 1] = env.Z
+            term = ops[0]
+            for o in ops[1:]:
+                term = torch.kron(term, o)
+            self.ZZ_terms.append(term)
+
+        self.X_terms = []
+        for i in range(self.N):
+            ops = [env.I] * self.N
+            ops[i] = env.X
+            term = ops[0]
+            for o in ops[1:]:
+                term = torch.kron(term, o)
+            self.X_terms.append(term)
+
+        # --- Vectorization helpers ---
+        # Stack all Hamiltonian basis terms once:
+        # terms_stack: [T, dim, dim] where T = (N-1) + N = 2N-1 = theta_dim
+        # Use complex64 for the heavy SMC simulation to cut memory ~2x
+        self.sim_dtype = torch.complex64
+
+        terms = [t.to(self.device) for t in (self.ZZ_terms + self.X_terms)]
+        self.terms_stack = torch.stack([t.to(self.sim_dtype) for t in terms], dim=0)  # [T,dim,dim]
+        self.T = self.terms_stack.shape[0]
+
+        # Much smaller default chunk; matrix_exp peak is huge
+        self.sim_chunk_size = int(getattr(self, "sim_chunk_size", 8))
+
+
+        # Cache for predicted means for a given (qubit,basis,time) within current particle set
+        # key: (qubit_idx, basis_idx, time_idx) -> E_batch [P]
+        self._cache = {}
+
+        # Precompute bit masks to compute p_plus quickly
+        # Precompute per-qubit bitflip indices + sign/phase vectors (used for fast X/Y/Z means)
+        idxs = torch.arange(self.dim, device=self.device, dtype=torch.int64)
+        self._flip_idx = []
+        self._sign01   = []
+        self._phase    = []
+        for q in range(self.N):
+            bitpos = self.N - 1 - q
+            flip = idxs ^ (1 << bitpos)
+            bit  = ((idxs >> bitpos) & 1).to(torch.float32)
+            self._flip_idx.append(flip)
+            self._sign01.append(2.0 * bit - 1.0)
+            self._phase.append(1.0 - 2.0 * bit)
+
+
+        self.reset()
+
+    @torch.no_grad()
+    def _mean_outcome_from_state_batch(self, psi: torch.Tensor, qubit_idx: int, basis_idx: int) -> torch.Tensor:
+        """
+        psi: [B, dim] complex
+        returns: [B] float (mean outcome in [-1,1] under your convention)
+        """
+        q = int(qubit_idx)
+        flip = self._flip_idx[q]
+        sign01 = self._sign01[q].to(device=psi.device, dtype=psi.real.dtype)
+        phase  = self._phase[q].to(device=psi.device, dtype=psi.real.dtype)
+        return mean_outcome_from_state_precomp(psi, flip, sign01, phase, int(basis_idx))
+
+    def reset(self):
+        # Sample prior particles uniformly
+        u = torch.rand(self.P, self.theta_dim, device=self.device)
+        self.particles = self.prior_low + u * (self.prior_high - self.prior_low)
+        self.w = torch.full((self.P,), 1.0 / self.P, device=self.device, dtype=torch.float32)
+        self._cache.clear()
+
+    @torch.no_grad()
+    def posterior_mean_and_covariance(self):
+        """
+        Returns:
+          mean: [theta_dim]
+          cov:  [theta_dim, theta_dim]
+        """
+        w = self.w
+        parts = self.particles
+
+        mean = (w.unsqueeze(-1) * parts).sum(dim=0)  # [theta_dim]
+        centered = parts - mean  # [P,theta_dim]
+
+        # Weighted covariance (vectorized):
+        # cov = sum_p w_p * outer(centered_p, centered_p)
+        cov = torch.einsum("p,pi,pj->ij", w, centered, centered).to(torch.float32)
+
+        cov = cov + 1e-6 * torch.eye(self.theta_dim, device=self.device, dtype=torch.float32)
+        return mean.float(), cov
+
+    @torch.no_grad()
+    def _build_H(self, theta: torch.Tensor):
+        # theta: [theta_dim]
+        J = theta[: self.N - 1]
+        h = theta[self.N - 1 :]
+        H = torch.zeros((self.dim, self.dim), device=self.device, dtype=torch.complex128)
+        for i in range(self.N - 1):
+            H = H + (J[i].to(torch.complex128) * self.ZZ_terms[i].to(torch.complex128))
+        for i in range(self.N):
+            H = H + (h[i].to(torch.complex128) * self.X_terms[i].to(torch.complex128))
+        return H
+
+    @torch.no_grad()
+    def _predict_mean_outcome_batch(self, thetas: torch.Tensor, qubit_idx: int, basis_idx: int, time_idx: int):
+        """
+        Memory-safe batched Hamiltonian simulation.
+
+        thetas:  [P, theta_dim]
+        returns: [P] float32
+        """
+        P_total = int(thetas.shape[0])
+        tau = float(self.env.times[int(time_idx)])
+
+        # ---- pick chunk size (auto shrink on small GPUs) ----
+        chunk_size = int(getattr(self, "sim_chunk_size", 8))
+
+        if self.device.type == "cuda":
+            try:
+                free_bytes, _ = torch.cuda.mem_get_info(self.device)
+            except TypeError:
+                free_bytes, _ = torch.cuda.mem_get_info()
+
+            bytes_per_complex = 8 if self.sim_dtype == torch.complex64 else 16
+            mat_bytes = int(self.dim * self.dim * bytes_per_complex)
+
+            # Very conservative multiplier for H, U, and matrix_exp workspace
+            est_bytes_per_particle = 10 * mat_bytes
+
+            # use at most ~40% of currently free memory for this chunk
+            max_chunk = max(1, int((0.40 * free_bytes) // est_bytes_per_particle))
+            chunk_size = max(1, min(chunk_size, max_chunk, P_total))
+        else:
+            chunk_size = max(1, min(chunk_size, P_total))
+
+        p_readout = float(self.env.noise_prob)
+        out = []
+
+        for start in range(0, P_total, chunk_size):
+            end = min(start + chunk_size, P_total)
+            batch_thetas = thetas[start:end]                 # [B,theta_dim]
+            coeffs = batch_thetas.to(self.sim_dtype)         # [B,T]
+
+            # H: [B,dim,dim]
+            H = torch.einsum("bt,tdk->bdk", coeffs, self.terms_stack)
+
+            # U = exp(-i H tau): [B,dim,dim]
+            U = torch.matrix_exp((-1j) * H * tau)
+
+            # psi(t) = U @ |0...0>  == first column of U
+            psi = U[..., :, 0]                                # [B,dim]
+
+            # Fast mean outcome in desired basis (no rotations, no probs, no masks)
+            E = self._mean_outcome_from_state_batch(psi, int(qubit_idx), int(basis_idx))
+
+            # Readout flip noise scales mean by (1 - 2p)
+            E = E * (1.0 - 2.0 * p_readout)
+
+            out.append(E.to(torch.float32))
+
+            del H, U, psi, E
+
+        return torch.cat(out, dim=0)
+
+
+
+
+    @torch.no_grad()
+    def _predict_mean_outcome(self, theta: torch.Tensor, qubit_idx: int, basis_idx: int, time_idx: int):
+        # Keep signature; use the batch path with a single element
+        E1 = self._predict_mean_outcome_batch(theta.unsqueeze(0), qubit_idx, basis_idx, time_idx)
+        return E1[0]
+
+    @torch.no_grad()
+    def update(self, obs: torch.Tensor, info: dict, env=None):
+        """
+        obs:  [N] float tensor with only obs[qubit_idx] nonzero (mean outcome)
+        info: from env.step(...) containing qubit_idx, basis_idx, time_idx, shots
+        """
+        qubit_idx = int(info["qubit_idx"])
+        basis_idx = int(info["basis_idx"])
+        time_idx  = int(info["time_idx"])
+        shots     = int(info.get("shots", getattr(self.env, "current_shots", 1)))
+
+        y = obs[qubit_idx].float().clamp(-1.0, 1.0)
+
+        # Vectorized E for all particles (with per-action cache)
+        key = (qubit_idx, basis_idx, time_idx)
+        if key in self._cache:
+            E = self._cache[key]  # [P]
+        else:
+            E = self._predict_mean_outcome_batch(self.particles, qubit_idx, basis_idx, time_idx)  # [P]
+            self._cache[key] = E
+
+        # Approx variance of sample mean of +/-1 draws
+        var = (1.0 - E * E).clamp_min(1e-6) / max(1, shots)  # [P]
+
+        # log-likelihood for each particle
+        ll = -0.5 * ((y - E) ** 2) / var - 0.5 * torch.log(var)  # [P]
+
+        # Weight update (stable)
+        logw = ll - ll.max()
+        w_new = self.w * torch.exp(logw)
+        w_new = w_new / (w_new.sum() + 1e-12)
+        self.w = w_new
+
+        # Resample if ESS low
+        ess = 1.0 / (self.w.pow(2).sum() + 1e-12)
+        if float(ess.item()) < self.ess_threshold:
+            self._systematic_resample()
+            self._roughen()
+            self._cache.clear()
+
+        return self.posterior_mean_and_covariance()
+
+    @torch.no_grad()
+    def _systematic_resample(self):
+        positions = (torch.rand((), device=self.device) + torch.arange(self.P, device=self.device)) / self.P
+        cdf = torch.cumsum(self.w, dim=0)
+        idx = torch.searchsorted(cdf, positions).clamp(0, self.P - 1)
+        self.particles = self.particles[idx]
+        self.w = torch.full((self.P,), 1.0 / self.P, device=self.device, dtype=torch.float32)
+
+    @torch.no_grad()
+    def _roughen(self):
+        span = (self.prior_high - self.prior_low)
+        noise = torch.randn_like(self.particles) * (self.roughen_frac * span)
+        self.particles = (self.particles + noise).clamp(self.prior_low, self.prior_high)
 
 def kl_divergence(mu, log_sigma):
     """
@@ -143,8 +478,15 @@ def pretrain_vae(n_qubits, L, num_samples=50000, batch_size=128,
     dataset = MeasurementDataset(n_qubits, num_samples)
     val_split = int(0.9 * num_samples)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [val_split, num_samples - val_split])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=8, pin_memory=True, persistent_workers=True
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=8, pin_memory=True, persistent_workers=True
+    )
+
 
     # Initialize model, optimizer, loss function
     model = VariationalAutoencoder(M, L).to(device)
@@ -365,102 +707,95 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TemporalContextualAggregator(nn.Module):
-    def __init__(self, L: int, T: int = 4, num_heads: int = 2, dropout: float = 0.1):
+    def __init__(self, L: int, T: int = 4, num_heads: int = 2, dropout: float = 0.1, n_layers: int = 2):
         """
-        Block 3: Temporal & Contextual Feature Aggregator for SymQNet.
+        Block 3: Transformer-based Temporal & Contextual Feature Aggregator.
 
-        Args:
-          L (int): latent dimension
-          T (int): expected window size (for positional‐info or asserts only)
-          num_heads (int): number of attention heads
+        - Uses a causal TransformerEncoder so the agent can attend to informative past measurements.
+        - Keeps the "embed_dim divisible by num_heads" safety fix via an attn_dim projection.
         """
         super().__init__()
-        self.L = L
-        self.T = T
+        self.L = int(L)
+        self.T = int(T)
+        self.num_heads = int(num_heads)
 
-        # Causal TCN layers
-        self.conv1 = nn.Conv1d(L, L, kernel_size=2, dilation=1, padding=0)
-        self.ln1   = nn.LayerNorm(L)
-        self.drop1 = nn.Dropout(dropout)
+        # ---- Attention dimension fix ----
+        self.attn_dim = ((self.L + self.num_heads - 1) // self.num_heads) * self.num_heads
 
-        self.conv2 = nn.Conv1d(L, L, kernel_size=2, dilation=2, padding=0)
-        self.ln2   = nn.LayerNorm(L)
-        self.drop2 = nn.Dropout(dropout)
+        if self.attn_dim != self.L:
+            self.pre  = nn.Linear(self.L, self.attn_dim, bias=False)
+            self.post = nn.Linear(self.attn_dim, self.L, bias=False)
+        else:
+            self.pre  = nn.Identity()
+            self.post = nn.Identity()
 
-        # Multi‐head self‐attention
-        # batch_first=True so input is [B, T, L]
-        self.attn = nn.MultiheadAttention(embed_dim=L,
-                                          num_heads=num_heads,
-                                          batch_first=True,
-                                          dropout=dropout)
+        # Learnable positional embedding (fixed horizon T)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.T, self.attn_dim))
 
-        # Final projection
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=self.attn_dim,
+            nhead=self.num_heads,
+            dim_feedforward=4 * self.attn_dim,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=int(n_layers))
+
         self.out = nn.Sequential(
-            nn.Linear(L, L),
-            nn.LayerNorm(L),
+            nn.Linear(self.L, self.L),
+            nn.LayerNorm(self.L),
             nn.Dropout(dropout),
         )
 
-        # Initialize weights
+        # Init linears
         for m in self.modules():
-            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv1d):
+            if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
     def forward(self, zG_buffer: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-          zG_buffer: [T, L] or [B, T, L] tensor of past graph embeddings.
-
-        Returns:
-          c_t: [L] or [B, L] contextual embedding.
+        zG_buffer: [T, L] or [B, T, L]
+        returns:   [L] or [B, L]
         """
-        # -- ensure batch dimension --
         if zG_buffer.dim() == 2:
-            x = zG_buffer.unsqueeze(0)     # [1, T, L]
+            x = zG_buffer.unsqueeze(0)  # [1, T, L]
             squeeze = True
         elif zG_buffer.dim() == 3:
-            x = zG_buffer                # [B, T, L]
+            x = zG_buffer               # [B, T, L]
             squeeze = False
         else:
             raise ValueError("zG_buffer must be [T,L] or [B,T,L]")
 
-        B, T, L = x.shape
-        assert L == self.L, f"Expected L={self.L}, got {L}"
+        B, T_in, L_in = x.shape
+        if L_in != self.L:
+            raise ValueError(f"Expected last dim L={self.L}, got {L_in}")
 
-        # -- TCN Layer 1 (dilation=1, causal) --
-        # conv1d expects [B, channels=L, seq_len=T]
-        x1 = x.transpose(1, 2)                # [B, L, T]
-        x1 = F.pad(x1, (1, 0))                # pad left=1 for kernel_size=2
-        x1 = self.conv1(x1)                   # [B, L, T]
-        x1 = F.relu(x1).transpose(1, 2)       # [B, T, L]
-        x1 = self.ln1(x1)
-        x1 = self.drop1(x1)
+        # Ensure length exactly self.T (pad left with zeros or take last T)
+        if T_in < self.T:
+            pad = torch.zeros(B, self.T - T_in, self.L, device=x.device, dtype=x.dtype)
+            x = torch.cat([pad, x], dim=1)
+        elif T_in > self.T:
+            x = x[:, -self.T:, :]
 
-        # -- TCN Layer 2 (dilation=2, causal) --
-        x2 = x1.transpose(1, 2)               # [B, L, T]
-        x2 = F.pad(x2, (2, 0))                # pad left=2
-        x2 = self.conv2(x2)                   # [B, L, T]
-        x2 = F.relu(x2).transpose(1, 2)       # [B, T, L]
-        x2 = self.ln2(x2)
-        x2 = self.drop2(x2)
+        # Project to attn_dim + add pos emb
+        h = self.pre(x)  # [B, T, attn_dim]
+        h = h + self.pos_emb[:, : h.size(1), :]
 
-        # Residual skip
-        U = x1 + x2                           # [B, T, L]
+        # Causal mask (prevent attending to future)
+        T_use = h.size(1)
+        mask = torch.triu(torch.full((T_use, T_use), float("-inf"), device=h.device), diagonal=1)
 
-        # -- Multi-Head Self-Attention Over Time --
-        # attn: query/key/value = U
-        # returns attn_output [B, T, L]
-        O, _ = self.attn(U, U, U)             # batch_first=True
-
-        # take the last time step
-        o_t = O[:, -1, :]                     # [B, L]
-
-        # final projection
-        c_t = self.out(o_t)                   # [B, L]
+        h = self.encoder(h, mask=mask)   # [B, T, attn_dim]
+        o_t = h[:, -1, :]                # [B, attn_dim]
+        o_t = self.post(o_t)             # [B, L]
+        c_t = self.out(o_t)              # [B, L]
 
         return c_t.squeeze(0) if squeeze else c_t
+
 
 import torch
 import torch.nn as nn
@@ -653,17 +988,22 @@ class SpinChainEnv(gym.Env):
     metadata = {"render.modes": []}
 
     def __init__(self,
-                 N=10,
-                 M_evo=5,
-                 T=8,
-                 noise_prob=0.02,
-                 seed=None,
-                 device=torch.device("cpu"),
-                 # FIX: resampling controls
-                 resample_each_reset=True,
-                 resample_every=1,          # set >1 if matrix_exp is too expensive
-                 J_range=(0.5, 1.5),
-                 h_range=(0.5, 1.5)):
+             N=10,
+             M_evo=5,
+             T=8,
+             noise_prob=0.02,
+             seed=None,
+             device=torch.device("cpu"),
+             # FIX: resampling controls
+             resample_each_reset=True,
+             resample_every=1,          # set >1 if matrix_exp is too expensive
+             J_range=(0.5, 1.5),
+             h_range=(0.5, 1.5),
+             # NEW: shot control
+             default_shots=128,
+             shots_set=(32, 64, 128, 256, 512),
+             sample_shots_each_step=False):
+
         super().__init__()
         self.N         = N
         self.M_evo     = M_evo
@@ -679,37 +1019,57 @@ class SpinChainEnv(gym.Env):
         self.h_range = h_range
         self._episode_counter = 0
 
+        # NEW: shots config
+        self.default_shots = int(default_shots)
+        self.shots_set = tuple(shots_set) if shots_set is not None else None
+        self.sample_shots_each_step = bool(sample_shots_each_step)
+        self.shots_max = max(self.shots_set) if self.shots_set is not None else self.default_shots
+        self.current_shots = self.default_shots
+
         # Discrete evolution times
         self.times = np.linspace(0.1, 1.0, M_evo)
 
         # Pauli & identity on single qubit
-        self.Z = torch.tensor([[1,0],[0,-1]], dtype=torch.complex128, device=device)
-        self.X = torch.tensor([[0,1],[1,0]], dtype=torch.complex128, device=device)
-        self.H = (1/np.sqrt(2)) * torch.tensor([[1,1],[1,-1]], dtype=torch.complex128, device=device)
-        self.Sdg = torch.tensor([[1,0],[0,-1j]], dtype=torch.complex128, device=device)
-        self.I = torch.eye(2, dtype=torch.complex128, device=device)
+        cdtype = torch.complex64
+        fdtype = torch.float32
+
+        self.Z = torch.tensor([[1, 0], [0, -1]], dtype=cdtype, device=device)
+        self.X = torch.tensor([[0, 1], [1, 0]], dtype=cdtype, device=device)
+
+        inv_sqrt2 = torch.tensor(1.0 / np.sqrt(2.0), dtype=fdtype, device=device)
+        self.H = inv_sqrt2 * torch.tensor([[1, 1], [1, -1]], dtype=cdtype, device=device)
+
+        self.Sdg = torch.tensor([[1, 0], [0, -1j]], dtype=cdtype, device=device)
+        self.I = torch.eye(2, dtype=cdtype, device=device)
+
 
         # Precompute single-qubit readout rotations (independent of J/h)
-        self.UX_list = []
-        self.UY_list = []
-        for q in range(N):
-            UX = torch.eye(1, dtype=torch.complex128, device=device)
-            UY = torch.eye(1, dtype=torch.complex128, device=device)
-            for i in range(N):
-                if i == q:
-                    UX = torch.kron(UX, self.H)
-                    UY = torch.kron(UY, self.Sdg @ self.H)
-                else:
-                    UX = torch.kron(UX, self.I)
-                    UY = torch.kron(UY, self.I)
-            self.UX_list.append(UX)
-            self.UY_list.append(UY)
+        # NOTE: No dense UX/UY rotation matrices.
+        # We compute X/Y/Z outcomes directly from the statevector using bit tricks.
+        self.UX_list = None
+        self.UY_list = None
+
+
 
         # Initial state |0…0>
         dim = 2**N
-        psi0 = torch.zeros((dim,1), dtype=torch.complex128, device=device)
-        psi0[0,0] = 1.0 + 0j
+        psi0 = torch.zeros((dim, 1), dtype=cdtype, device=device)
+        psi0[0, 0] = 1.0 + 0j
         self.psi0 = psi0
+
+        # Precompute per-qubit bitflip indices + sign/phase vectors (GPU-friendly)
+        idxs = torch.arange(dim, device=device, dtype=torch.int64)
+        self._flip_idx = []
+        self._sign01   = []   # |0>->-1, |1>->+1
+        self._phase    = []   # |0>:+1, |1>:-1
+        for q in range(N):
+            bitpos = N - 1 - q
+            flip = idxs ^ (1 << bitpos)
+            bit  = ((idxs >> bitpos) & 1).to(fdtype)
+            self._flip_idx.append(flip)
+            self._sign01.append(2.0 * bit - 1.0)
+            self._phase.append(1.0 - 2.0 * bit)
+
 
         # Gym spaces
         self.observation_space = spaces.Box(-1.0, 1.0, shape=(N,), dtype=np.float32)
@@ -736,37 +1096,55 @@ class SpinChainEnv(gym.Env):
 
     def _build_hamiltonian(self, J, h):
         N = self.N
-        H = torch.zeros((2**N, 2**N), dtype=torch.complex128, device=self.device)
+        cdtype = self.I.dtype  # keep consistent with env matrices
+
+        # prevent dtype promotion (float64 -> complex128)
+        J = torch.as_tensor(J, device=self.device, dtype=torch.float32)
+        h = torch.as_tensor(h, device=self.device, dtype=torch.float32)
+
+        H = torch.zeros((2**N, 2**N), dtype=cdtype, device=self.device)
+
         # ZZ couplings
-        for i in range(N-1):
-            ops = [self.I]*N
-            ops[i]   = self.Z
-            ops[i+1] = self.Z
+        for i in range(N - 1):
+            ops = [self.I] * N
+            ops[i] = self.Z
+            ops[i + 1] = self.Z
             term = ops[0]
             for o in ops[1:]:
                 term = torch.kron(term, o)
             H = H + J[i] * term
+
         # X fields
         for i in range(N):
-            ops = [self.I]*N
+            ops = [self.I] * N
             ops[i] = self.X
             term = ops[0]
             for o in ops[1:]:
                 term = torch.kron(term, o)
             H = H + h[i] * term
+
         return H
+
 
     # FIX: task resampling helper
     def _resample_task(self):
         self.J_true = np.random.uniform(*self.J_range, size=(self.N - 1,))
         self.h_true = np.random.uniform(*self.h_range, size=(self.N,))
-        self.H_true = self._build_hamiltonian(self.J_true, self.h_true).to(self.device)
+        self.H_true = self._build_hamiltonian(self.J_true, self.h_true)
 
-        # Precompute all evolution unitaries U(τ) = e^{-i H τ}
-        self.U_list = [
-            torch.matrix_exp(-1j * self.H_true * tau).to(self.device)
-            for tau in self.times
-        ]
+        i_unit = torch.tensor(1j, device=self.device, dtype=self.I.dtype)  # complex64
+
+        # Store only psi(t) = exp(-i H t) |0...0>, not the full U(t)
+        self.psi_list = []
+        for tau in self.times:
+            tau_t = torch.tensor(float(tau), device=self.device, dtype=torch.float32)
+            U = torch.matrix_exp((-i_unit) * self.H_true * tau_t)
+            self.psi_list.append(U[:, 0:1].contiguous())  # first column == U @ |0...0>
+            del U
+
+        self.U_list = None  # not needed anymore
+
+
 
     def reset(self):
         self.step_count = 0
@@ -777,34 +1155,54 @@ class SpinChainEnv(gym.Env):
         if self.resample_each_reset and ((self._episode_counter - 1) % self.resample_every == 0):
             self._resample_task()
 
+        # NEW: choose shots for this episode (unless sampling each step)
+        if (self.shots_set is not None) and (not self.sample_shots_each_step):
+            self.current_shots = int(np.random.choice(self.shots_set))
+        else:
+            self.current_shots = int(self.default_shots)
+
         return np.zeros(self.N, dtype=np.float32)
 
-    def _measure(self, psi, basis, qubit_idx):
-        # rotate into measurement basis
-        if basis == 'Z':
-            psi_rot = psi
-        elif basis == 'X':
-            psi_rot = self.UX_list[qubit_idx] @ psi
-        elif basis == 'Y':
-            psi_rot = self.UY_list[qubit_idx] @ psi
+
+    def _measure(self, psi, basis, qubit_idx, shots: int = 1):
+        # psi: [dim,1] or [dim]
+        if psi.dim() == 2:
+            psi = psi.squeeze(-1)
+        psi = psi.to(device=self.device, dtype=self.I.dtype)
+
+        basis_idx = {"X": 0, "Y": 1, "Z": 2}[basis]
+        q = int(qubit_idx)
+
+        flip  = self._flip_idx[q]
+        sign01 = self._sign01[q].to(device=psi.device, dtype=psi.real.dtype)
+        phase  = self._phase[q].to(device=psi.device, dtype=psi.real.dtype)
+
+        # Ideal mean outcome (your convention)
+        E = mean_outcome_from_state_precomp(psi, flip, sign01, phase, basis_idx)
+
+        # Readout flip noise: +/-1 outcome flips with prob p -> scales mean by (1 - 2p)
+        E = E * (1.0 - 2.0 * float(self.noise_prob))
+
+        # Sample "shots" times (GPU) and return mean in [-1, 1]
+        # Sample "shots" times and return the empirical mean in [-1, 1]
+        # This matches the SMC update model y ~ Normal(E, (1-E^2)/shots).
+        shots = int(max(1, shots))
+
+        if shots == 1:
+            mean_outcome = E
         else:
-            raise ValueError("Invalid basis")
+            p_plus = (0.5 * (1.0 + E)).clamp(0.0, 1.0)
+            # Binomial draw for number of +1 outcomes
+            n_plus = torch.distributions.Binomial(total_count=shots, probs=p_plus).sample()
+            mean_outcome = (2.0 * n_plus - shots) / shots
 
-        probs = (psi_rot.abs()**2).flatten().real.cpu().numpy()
-        idx   = np.random.choice(len(probs), p=probs)
-        bits = np.array([(idx >> (self.N - 1 - i)) & 1 for i in range(self.N)], dtype=np.float32)
-        bits = 2 * bits - 1.0
 
-        # mask out other qubits if needed
-        if qubit_idx is not None:
-            mask = np.zeros_like(bits)
-            mask[qubit_idx] = bits[qubit_idx]
-            bits = mask
 
-        # add noise flips
-        flips = np.random.rand(self.N) < self.noise_prob
-        bits[flips] *= -1.0
-        return bits
+        obs = np.zeros(self.N, dtype=np.float32)
+        obs[q] = float(mean_outcome.item())
+        return obs
+
+
 
     def step(self, action):
         a        = int(action)
@@ -814,10 +1212,15 @@ class SpinChainEnv(gym.Env):
         qubit_idx= a // 3
 
         basis = ['X','Y','Z'][basis_idx]
-        U     = self.U_list[time_idx]
-        psi_t = U @ self.psi0
+        psi_t = self.psi_list[time_idx]   # already exp(-iHt)|0...0>
 
-        obs = self._measure(psi_t, basis=basis, qubit_idx=qubit_idx)
+
+        # NEW: optionally resample shots each step
+        if self.sample_shots_each_step and (self.shots_set is not None):
+            self.current_shots = int(np.random.choice(self.shots_set))
+
+        obs = self._measure(psi_t, basis=basis, qubit_idx=qubit_idx, shots=self.current_shots)
+
         reward = 0.0
         self.step_count += 1
         done = (self.step_count >= self.T)
@@ -827,9 +1230,12 @@ class SpinChainEnv(gym.Env):
             'h_true': self.h_true.copy(),
             'qubit_idx': qubit_idx,
             'basis_idx': basis_idx,
-            'time_idx': time_idx
+            'time_idx': time_idx,
+            # NEW:
+            'shots': int(self.current_shots),
         }
         return obs, reward, done, info
+
 
 
 # --------------------------------------
@@ -841,12 +1247,12 @@ from torch.utils.data import TensorDataset, DataLoader
 from tqdm.auto import tqdm
 
 # Hyper‐parameters
-n_qubits   = 10
+n_qubits   = 5
 M          = n_qubits          # input/output dimension of VAE
-L          = 64                # latent dimension
+L          = 16                # latent dimension
 batch_size = 32
 epochs     = 300
-beta       = 5e-3              # KL weight
+beta       = 3e-3              # KL weight
 n_samples  = 15000             # dataset size
 lr_vae     = 3e-4
 device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1025,30 +1431,35 @@ def set_seed(seed: int):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def compute_gae(rewards, values, gamma=0.99, lam=0.95):
+def compute_gae_dones(rewards, values, dones, last_value, gamma=0.99, lam=0.95):
     """
-    Compute Generalized Advantage Estimation (GAE).
+    GAE for rollouts that may contain multiple episodes.
+
+    rewards:     list/1D tensor length T
+    values:      1D tensor length T (V(s_t) under old policy)
+    dones:       1D tensor length T with 1.0 where episode ended at t
+    last_value:  scalar tensor V(s_{T}) for bootstrap (ignored when dones[-1]=1)
     """
-    vals_1d = values.squeeze(-1)
-    T = len(rewards)
-    device = vals_1d.device
+    if not torch.is_tensor(rewards):
+        rewards = torch.tensor(rewards, device=values.device, dtype=values.dtype)
+    if not torch.is_tensor(dones):
+        dones = torch.tensor(dones, device=values.device, dtype=values.dtype)
 
-    # Append a zero at the end for bootstrap
-    vals_ext = torch.cat([vals_1d, torch.zeros(1, device=device)])
-
-    advs = torch.zeros(T, device=device)
-    last = 0.0
+    T = rewards.shape[0]
+    adv = torch.zeros((), device=values.device, dtype=values.dtype)
+    advs = torch.zeros(T, device=values.device, dtype=values.dtype)
 
     for t in reversed(range(T)):
-        nonterm = 1.0 if t < T - 1 else 0.0
-        delta = rewards[t] + gamma * vals_ext[t + 1] * nonterm - vals_ext[t]
-        last = delta + gamma * lam * nonterm * last
-        advs[t] = last
+        nonterminal = 1.0 - dones[t]
+        next_value = last_value if t == T - 1 else values[t + 1]
+        delta = rewards[t] + gamma * next_value * nonterminal - values[t]
+        adv = delta + gamma * lam * nonterminal * adv
+        advs[t] = adv
 
-    returns = advs + vals_1d
+    returns = advs + values
     advs = (advs - advs.mean()) / (advs.std() + 1e-8)
-
     return returns, advs
+
 
 
 
@@ -1066,7 +1477,28 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.M_evo = M_evo
 
         # Metadata dimensions
-        self.meta_dim = n_qubits + 3 + M_evo  # qubit + basis + time
+        # Metadata dimensions (+ parameter feedback)
+        # Metadata dimensions
+        # base: qubit one-hot (N) + basis one-hot (3) + time one-hot (M_evo)
+        base = n_qubits + 3 + M_evo
+
+        # Belief-state feedback dims
+        self.theta_dim = 2 * n_qubits - 1
+
+        # Slots (keep shots in the last slot so existing code patterns remain simple)
+        self.theta_slot0 = base                          # posterior mean
+        self.cov_slot0   = self.theta_slot0 + self.theta_dim
+
+        self.cov_feat_dim    = self.theta_dim + 8        # diag + top-8 eigs
+        self.fisher_slot0    = self.cov_slot0 + self.cov_feat_dim
+        self.fisher_feat_dim = self.theta_dim            # <-- fisher feature length
+
+        self.shots_slot = self.fisher_slot0 + self.fisher_feat_dim  # <-- move shots AFTER fisher
+        self.meta_dim   = self.shots_slot + 1
+
+
+
+
 
         # Block 1: Graph embedding (operates on latent + metadata)
         # FIXED: Use correct GraphEmbed signature
@@ -1086,13 +1518,9 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.policy_value = PolicyValueHead(L + self.meta_dim, A)
 
         # Block 4: Parameter estimator
-        self.estimator = nn.Sequential(
-            nn.Linear(L + self.meta_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 2 * n_qubits - 1)  # J + h parameters
-        )
+        # Block 4: Parameter estimator (mu + logvar => enables Fisher/CRB-style feedback)
+
+
 
         # Ring buffer for temporal context
         self.zG_history = []
@@ -1113,8 +1541,9 @@ class FixedSymQNetWithEstimator(nn.Module):
         # Block 1: VAE encoding with metadata
         with torch.no_grad():
             mu_z, logvar_z = self.vae.encode(obs)
-            z = self.vae.reparameterize(mu_z, logvar_z)
+            z = mu_z  # deterministic encoding is important for PPO stability / consistent re-eval
         z_with_meta = torch.cat([z, metadata], dim=-1)
+
 
 
         # Block 2: Graph embedding
@@ -1134,19 +1563,56 @@ class FixedSymQNetWithEstimator(nn.Module):
         c_t = self.temp_agg(buf_tensor)
 
         # Block 4a: Policy and Value
+        # Policy and Value only (belief comes from SMC via metadata)
+        dist, V = self.policy_value(c_t)
+        return dist, V
+
+
+    def forward_window(self, z_with_meta_window: torch.Tensor):
+        """
+        Stateless forward used for PPO minibatching.
+
+        z_with_meta_window: [T, D] or [B, T, D], where D = L + meta_dim.
+        Returns: dist, V, theta_mu, theta_logvar (batched if B>1).
+        """
+        if z_with_meta_window.dim() == 2:
+            x = z_with_meta_window.unsqueeze(0)
+            squeeze = True
+        elif z_with_meta_window.dim() == 3:
+            x = z_with_meta_window
+            squeeze = False
+        else:
+            raise ValueError("z_with_meta_window must be [T,D] or [B,T,D]")
+
+        B, T, D = x.shape
+
+        # Graph embed each step, vectorized over (B*T)
+        zG = self.graph_embed(x.reshape(B * T, D)).reshape(B, T, D)
+
+        # Temporal aggregation
+        c_t = self.temp_agg(zG)
+
+        # Policy/value + estimator
         dist, V = self.policy_value(c_t)
 
-        # Block 4b: Parameter estimation
-        theta_hat = self.estimator(c_t)
+        if squeeze:
+            return dist, V.squeeze(0)
+        return dist, V
 
-        return dist, V, theta_hat
+
+
 
 # 4) Hyper-parameters
-n_qubits    = 10
-L           = 64
-T           = 10
+n_qubits    = 5
+L           = 16
+
 episodes    = 2_500_000
-max_steps   = 150
+
+theta_dim   = 2 * n_qubits - 1
+T_env       = min(150, max(30, int(4 * theta_dim)))   # n_qubits=10 -> 76
+T           = min(20, T_env)                           # model history window (keep compute reasonable)
+max_steps   = T_env                                    # actual episode horizon
+
 gamma       = 0.99
 lam         = 0.95
 initial_lr  = 1e-4
@@ -1156,6 +1622,7 @@ est_coef    = 0.4      # ADDED: Estimation loss coefficient
 clip_grad   = 0.5     # ADDED: Gradient clipping
 seed        = 777
 device      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+clip_eps    = 0.2
 
 set_seed(seed)
 
@@ -1163,11 +1630,21 @@ set_seed(seed)
 env = SpinChainEnv(
     N=n_qubits,
     M_evo=5,
-    T=T,
+    T=T_env,
     noise_prob=0.02,
     seed=seed,
-    device=device
+    device=device,
+
+    # throttle expensive Hamiltonian resampling / expm
+    resample_each_reset=True,
+    resample_every=50,  # tune: 10..200 depending on speed/variance tradeoff
+
+    default_shots=128,
+    shots_set=(32, 64, 128, 256, 512),
+    sample_shots_each_step=False,  # per-episode shot count
 )
+
+
 env.seed(seed)
 
 
@@ -1213,204 +1690,409 @@ def lr_lambda(current_episode: int):
 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 # 9) TensorBoard
-writer = SummaryWriter(log_dir="FIXED_SYMQNET_GO_")
+writer = SummaryWriter(log_dir="_FIXED_SYMQNET_FINAL")
 
 # 10) FIXED: Training loop with proper metadata tracking
-print(f"Training FIXED SymQNet on {device} for {episodes} episodes...")
+# 10) PPO v2: batched rollouts + multi-epoch minibatch updates
+print(f"Training PPO v2 SymQNet on {device} for {episodes} PPO updates...")
 
-# Validation tracking
-best_performance = float('inf')
-validation_freq = 100
+# IMPORTANT for PPO ratio stability with dropout modules (Transformer encoder uses Dropout)
+agent.eval()
 
-for ep in range(1, episodes + 1):
-    obs = env.reset()
-    agent.reset_buffer()
+# PPO rollout/update hyper-params
+rollout_steps   = 64          # typical PPO batch; try 1024 if env is slow
+ppo_epochs      = 2
+num_minibatches = 2
+minibatch_size  = rollout_steps // num_minibatches
+assert rollout_steps % num_minibatches == 0
 
-    init_mse = None
-    logp_buf, val_buf, rew_buf, ent_buf, est_loss_buf = [], [], [], [], []
+# slots for metadata composition
+shots_slot   = agent.shots_slot
+theta_slot0  = agent.theta_slot0
+fisher_slot0 = agent.fisher_slot0
 
-    # FIXED: Track metadata from previous step's info
-    prev_info = None
+best_performance = float("inf")
+validation_freq  = 25  # measured in PPO updates
 
-    # --- drop-in: replace your entire inner loop with this ---
-    prev_info = None
-    pending = None  # (logp, V, ent) for the action whose reward we haven't assigned yet
-    init_mse = None
-    prev_mse = None
+# carry env state across rollouts
+obs = env.reset()
+agent.reset_buffer()
+prev_info = None
+pending = None
 
-    for step in range(max_steps):
+# per-episode shaping state
+init_mse = None
+prev_mse = None
+
+# belief-state feedback (1-step lag)
+prev_theta_feat  = torch.zeros(agent.theta_dim, device=device)
+prev_fisher_feat = torch.zeros(agent.theta_dim, device=device)
+
+prev_cov_feat = torch.zeros(agent.cov_feat_dim, device=device)
+
+
+# SMC posterior over theta (J,h)
+smc = SMCParticleFilter(env, n_particles=48, ess_frac=0.6, roughen_frac=0.03, device=device)
+
+# Force tiny chunks on 8GB GPUs (start with 4; if still OOM, use 2)
+smc.sim_chunk_size = 4
+
+smc.reset()
+
+
+
+# true theta for current task
+true_theta = np.concatenate([env.J_true, env.h_true])
+true_theta_t = torch.from_numpy(true_theta).float().to(device)
+
+for update in range(1, episodes + 1):
+    # rollout storage
+    obs_buf, meta_buf, act_buf = [], [], []
+    logp_buf, val_buf, rew_buf = [], [], []
+    info_gain_buf = []
+
+    done_buf, theta_true_buf   = [], []
+
+    ep_return = 0.0
+    ep_returns = []
+    ep_final_mses = []
+
+    last_value = torch.zeros((), device=device)
+
+    while len(rew_buf) < rollout_steps:
         obs_tensor = torch.from_numpy(obs).float().to(device)
 
         # metadata describes the action that produced *this* obs
-        if prev_info is not None:
-            qi = prev_info['qubit_idx']
-            bi = prev_info['basis_idx']
-            ti = prev_info['time_idx']
-        else:
-            qi = bi = ti = 0
+                # --- Build metadata for the action that produced *this* obs + update belief once ---
+        info_gain_prev_action = 0.0
+        info_gain_log = 0.0
 
+        # default: all-zero action metadata (first step in episode)
         metadata = torch.zeros(agent.meta_dim, device=device)
-        metadata[qi] = 1.0
-        metadata[n_qubits + bi] = 1.0
-        metadata[n_qubits + 3 + ti] = 1.0
 
-        dist, V, theta_hat = agent(obs_tensor, metadata)
+        if prev_info is not None:
+            qi = int(prev_info["qubit_idx"])
+            bi = int(prev_info["basis_idx"])
+            ti = int(prev_info["time_idx"])
+            shots_val = int(prev_info.get("shots", getattr(env, "current_shots", 1)))
+            shots_max = float(getattr(env, "shots_max", max(2, shots_val)))
 
-        # True params are constant within an episode
-        true_theta = np.concatenate([env.J_true, env.h_true])
-        pred_theta = theta_hat.detach().cpu().numpy()
+            # PRIOR (before conditioning on obs produced by prev_info)
+            _, cov_prior = smc.posterior_mean_and_covariance()
+            H_prior = gaussian_entropy_from_cov(cov_prior)
+
+            # POSTERIOR (after conditioning)
+            theta_mean, theta_cov = smc.update(obs_tensor, prev_info, env)
+            H_post = gaussian_entropy_from_cov(theta_cov)
+
+            ig = torch.clamp(H_prior - H_post, min=0.0)  # nats
+            info_gain_prev_action = float(ig.item())
+            info_gain_log = info_gain_prev_action
+
+            # Update belief feedback features for the policy
+            prev_theta_feat = theta_mean.detach()
+            prev_cov_feat = covariance_to_features(theta_cov).detach()
+
+            # Action metadata (one-hot + shots)
+            metadata[qi] = 1.0
+            metadata[n_qubits + bi] = 1.0
+            metadata[n_qubits + 3 + ti] = 1.0
+            metadata[shots_slot] = float(np.log2(max(1, shots_val)) / np.log2(max(2.0, shots_max)))
+
+        # Belief feedback always present (zeros on first step)
+        metadata[theta_slot0 : theta_slot0 + agent.theta_dim] = prev_theta_feat
+        metadata[agent.cov_slot0 : agent.cov_slot0 + agent.cov_feat_dim] = prev_cov_feat
+        metadata[fisher_slot0 : fisher_slot0 + agent.theta_dim] = prev_fisher_feat
+
+
+
+
+        # 2) Compute current MSE for shaping (using posterior mean)
+        pred_theta = prev_theta_feat.detach().cpu().numpy()
         curr_mse = float(((pred_theta - true_theta) ** 2).mean())
-
         if init_mse is None:
             init_mse = curr_mse
         if prev_mse is None:
             prev_mse = curr_mse
 
-        # Pay out reward for the *previous* action now that we’ve seen its resulting obs
+        # 3) Policy/value under old policy (no grad)
+        with torch.no_grad():
+            dist, V = agent(obs_tensor, metadata)
+
+
+        # pay out reward for previous action now that we see its outcome
         if pending is not None:
-            prev_logp, prev_V, prev_ent = pending
+            # InfoGain reward (nats). Optional tiny step-cost if you still want it:
+            r = float(info_gain_prev_action)  # - 0.01
+            info_gain_buf.append(info_gain_log)
 
-            improvement = (prev_mse - curr_mse) / (init_mse + 1e-8)
-            r = np.tanh(improvement * 10.0) - 0.01
 
-            logp_buf.append(prev_logp)
-            val_buf.append(prev_V)
-            ent_buf.append(prev_ent)
+
+            obs_buf.append(pending["obs"])
+            meta_buf.append(pending["meta"])
+            act_buf.append(pending["action"])
+            logp_buf.append(pending["logp_old"])
+            val_buf.append(pending["V_old"])
             rew_buf.append(r)
+            done_buf.append(0.0)
+            theta_true_buf.append(pending["true_theta"])
 
-            est_loss_buf.append(
-                F.mse_loss(theta_hat, torch.from_numpy(true_theta).float().to(device))
-            )
+            ep_return += r
+            pending = None
 
-        # Choose the next action and hold onto it until we observe the next state
-        a = dist.sample().item()
-        logp = dist.log_prob(torch.tensor(a, device=device))
-        ent = dist.entropy()
-        pending = (logp, V, ent)
+            # advance prev_mse after paying reward
+            prev_mse = curr_mse
 
-        obs2, _, done, info = env.step(a)
+            # if we just filled the rollout, bootstrap from V(current obs)
+            if len(rew_buf) >= rollout_steps:
+                last_value = V.detach().squeeze()
+                break
 
-        # advance env
+        # choose next action
+        a_t = dist.sample()
+        logp_t = dist.log_prob(a_t)
+
+        pending = {
+            "obs": obs_tensor.detach(),
+            "meta": metadata.detach(),
+            "action": a_t.detach(),
+            "logp_old": logp_t.detach(),
+            "V_old": V.detach().squeeze(),
+            "true_theta": true_theta_t.detach(),
+        }
+
+        # step env
+        obs2, _, done, info = env.step(int(a_t.item()))
         prev_info = info
         obs = obs2
-        prev_mse = curr_mse
 
+        # if episode ended, assign terminal reward for pending now
         if done:
-            # Flush terminal reward for the last pending action using the final post-action estimate
-            obs_tensor = torch.from_numpy(obs).float().to(device)
-            qi = prev_info['qubit_idx']
-            bi = prev_info['basis_idx']
-            ti = prev_info['time_idx']
+            obs_T = torch.from_numpy(obs).float().to(device)
 
-            metadata = torch.zeros(agent.meta_dim, device=device)
-            metadata[qi] = 1.0
-            metadata[n_qubits + bi] = 1.0
-            metadata[n_qubits + 3 + ti] = 1.0
+            qi = int(prev_info["qubit_idx"])
+            bi = int(prev_info["basis_idx"])
+            ti = int(prev_info["time_idx"])
+            shots_val = int(prev_info.get("shots", getattr(env, "current_shots", 1)))
+            shots_max = float(getattr(env, "shots_max", max(1, shots_val)))
 
-            _, _, theta_hat_T = agent(obs_tensor, metadata)
-            pred_theta_T = theta_hat_T.detach().cpu().numpy()
+            meta_T = torch.zeros(agent.meta_dim, device=device)
+            meta_T[qi] = 1.0
+            meta_T[n_qubits + bi] = 1.0
+            meta_T[n_qubits + 3 + ti] = 1.0
+            meta_T[shots_slot] = float(np.log2(max(1, shots_val)) / np.log2(max(2.0, shots_max)))
+
+            # belief feedback (match non-terminal metadata layout)
+            meta_T[theta_slot0 : theta_slot0 + agent.theta_dim] = prev_theta_feat
+            meta_T[agent.cov_slot0 : agent.cov_slot0 + agent.cov_feat_dim] = prev_cov_feat
+            meta_T[fisher_slot0 : fisher_slot0 + agent.theta_dim] = prev_fisher_feat
+
+
+            # Final posterior update for the terminal observation + terminal InfoGain reward
+            with torch.no_grad():
+                # prior entropy before conditioning on terminal obs
+                _, cov_prior_T = smc.posterior_mean_and_covariance()
+                H_prior_T = gaussian_entropy_from_cov(cov_prior_T)
+
+                # update on terminal obs
+                theta_mean_T, theta_cov_T = smc.update(obs_T, prev_info, env)
+
+                H_post_T = gaussian_entropy_from_cov(theta_cov_T)
+
+            # terminal InfoGain in nats (clamped)
+            # terminal InfoGain in nats (clamped)
+            rT = float(torch.clamp(H_prior_T - H_post_T, min=0.0).item())
+
+            # NEW: include terminal IG in TB stats
+            info_gain_buf.append(rT)
+
+            # (optional) keep your final MSE logging if you want it
+            pred_theta_T = theta_mean_T.detach().cpu().numpy()
             final_mse = float(((pred_theta_T - true_theta) ** 2).mean())
 
-            improvement_ratio = (init_mse - final_mse) / (init_mse + 1e-8)
-            rT = 5.0 * np.tanh(improvement_ratio)
 
-            last_logp, last_V, last_ent = pending
-            logp_buf.append(last_logp)
-            val_buf.append(last_V)
-            ent_buf.append(last_ent)
+            obs_buf.append(pending["obs"])
+            meta_buf.append(pending["meta"])
+            act_buf.append(pending["action"])
+            logp_buf.append(pending["logp_old"])
+            val_buf.append(pending["V_old"])
             rew_buf.append(rT)
-
-            est_loss_buf.append(
-                F.mse_loss(theta_hat_T, torch.from_numpy(true_theta).float().to(device))
-            )
-
-            curr_mse = final_mse  # so your logging reflects the real final estimate
-            break
+            done_buf.append(1.0)
+            theta_true_buf.append(pending["true_theta"])
 
 
-    # Rest of the training loop remains the same...
+            ep_return += rT
+            ep_returns.append(ep_return)
+            ep_final_mses.append(final_mse)
+
+            pending = None
+
+            # terminal => no bootstrap
+            last_value = torch.zeros((), device=device)
+
+            # reset episode state
+            obs = env.reset()
+            agent.reset_buffer()
+            prev_info = None
+
+            smc.reset()
+
+            init_mse = None
+            prev_mse = None
+            ep_return = 0.0
+
+            prev_theta_feat  = torch.zeros(agent.theta_dim, device=device)
+            prev_fisher_feat = torch.zeros(agent.theta_dim, device=device)
+            prev_cov_feat = torch.zeros(agent.cov_feat_dim, device=device)
 
 
-    # FIXED: Compute losses with estimation auxiliary loss
-    vals = torch.stack(val_buf)
-    logps = torch.stack(logp_buf)
-    ents = torch.stack(ent_buf)
-    est_losses = torch.stack(est_loss_buf)
+            true_theta = np.concatenate([env.J_true, env.h_true])
+            true_theta_t = torch.from_numpy(true_theta).float().to(device)
 
-    returns, advs = compute_gae(rew_buf, vals, gamma, lam)
+    # --- convert rollout to tensors ---
+    obs_b    = torch.stack(obs_buf).to(device)
+    meta_b   = torch.stack(meta_buf).to(device)
+    act_b    = torch.stack(act_buf).to(device)
+    old_logp = torch.stack(logp_buf).to(device)
+    old_val  = torch.stack(val_buf).to(device)
+    dones_t  = torch.tensor(done_buf, device=device, dtype=old_val.dtype)
+    true_th  = torch.stack(theta_true_buf).to(device)
 
-    # FIXED: Multi-objective loss
-    policy_loss = -(logps * advs.detach()).mean()
-    value_loss = (returns - vals).pow(2).mean()
-    entropy_loss = -ents.mean()
-    estimation_loss = est_losses.mean()  # Auxiliary estimation loss
+    # GAE (multi-episode safe)
+    returns, advs = compute_gae_dones(rew_buf, old_val, dones_t, last_value.detach(), gamma, lam)
+    returns = returns.detach()
+    advs    = advs.detach()
 
-    total_loss = (100000000 * 0.35 * policy_loss +
-                  0.2 * value_loss +
-                  0.1 * entropy_loss +
-                  0.35 * estimation_loss)
+    # deterministic latents (VAE frozen)
+    with torch.no_grad():
+        mu_z, _ = agent.vae.encode(obs_b)
+        z = mu_z
+    z_with_meta = torch.cat([z, meta_b], dim=-1)  # [N, D]
 
-    optimizer.zero_grad()
-    total_loss.backward()
+    # build causal windows per timestep (respect episode boundaries)
+    T_win = agent.T
+    N, D = z_with_meta.shape
+    windows = torch.zeros(N, T_win, D, device=device, dtype=z_with_meta.dtype)
 
-    # FIXED: Gradient clipping
-    torch.nn.utils.clip_grad_norm_(agent.parameters(), clip_grad)
+    ep_start = 0
+    for t in range(N):
+        if t > 0 and float(dones_t[t - 1].item()) == 1.0:
+            ep_start = t
+        s = max(ep_start, t - T_win + 1)
+        seq = z_with_meta[s : t + 1]
+        windows[t, -seq.shape[0] :, :] = seq
 
-    optimizer.step()
+    # --- PPO update: multi-epoch minibatch ---
+    # --- PPO update: multi-epoch minibatch ---
+    policy_losses, value_losses, ent_loss_vals, ent_vals, est_losses, total_losses = [], [], [], [], [], []
+
+
+
+    for epoch in range(ppo_epochs):
+        idx = torch.randperm(N, device=device)
+        for start in range(0, N, minibatch_size):
+            mb = idx[start : start + minibatch_size]
+
+            win_mb       = windows[mb]
+            act_mb       = act_b[mb]
+            old_logp_mb  = old_logp[mb]
+            old_val_mb   = old_val[mb]
+            ret_mb       = returns[mb]
+            adv_mb       = advs[mb]
+            th_mb        = true_th[mb]
+
+            dist, V = agent.forward_window(win_mb)
+
+            # --- PPO losses MUST be computed fresh per minibatch ---
+            act_mb = act_mb.long()  # Categorical expects Long actions
+
+            new_logp = dist.log_prob(act_mb)     # [B]
+            entropy  = dist.entropy()            # [B]
+
+            ratio = torch.exp(new_logp - old_logp_mb)  # [B]
+            surr1 = ratio * adv_mb
+            surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv_mb
+            policy_loss = -(torch.min(surr1, surr2)).mean()
+
+            value_loss = F.mse_loss(V, ret_mb)   # scalar
+
+            # maximize entropy => subtract it in the loss
+            entropy_mean = entropy.mean()
+            entropy_loss = -entropy_mean
+            
+
+            # (optional placeholder so your existing logging doesn't crash)
+            est_loss = torch.zeros((), device=device)
+
+            total_loss = policy_loss + val_coef * value_loss + ent_coef * entropy_loss + est_coef * est_loss
+
+            optimizer.zero_grad(set_to_none=True)
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(agent.parameters(), clip_grad)
+            optimizer.step()
+
+            policy_losses.append(policy_loss.item())
+            value_losses.append(value_loss.item())
+            ent_loss_vals.append(float(entropy_loss.detach().item()))
+            ent_vals.append(float(entropy_mean.detach().item()))
+            est_losses.append(float(est_loss.detach().item()))
+            total_losses.append(float(total_loss.detach().item()))
+
+
+
+
     scheduler.step()
 
-    # Enhanced logging
-    total_r = sum(rew_buf)
-    current_lr = optimizer.param_groups[0]['lr']
+    # --- logging ---
+    total_r = float(sum(rew_buf))
+    current_lr = optimizer.param_groups[0]["lr"]
+    avg_final_mse = float(np.mean(ep_final_mses)) if len(ep_final_mses) else float("nan")
 
-    writer.add_scalar("Reward/episode", total_r, ep)
-    writer.add_scalar("Loss/policy", policy_loss.item(), ep)
-    writer.add_scalar("Loss/value", value_loss.item(), ep)
-    writer.add_scalar("Loss/entropy", -entropy_loss.item(), ep)
-    writer.add_scalar("Loss/estimation", estimation_loss.item(), ep)
-    writer.add_scalar("Loss/total", total_loss.item(), ep)
-    writer.add_scalar("LearningRate", current_lr, ep)
-    writer.add_scalar("MSE/final", curr_mse, ep)
-    writer.add_scalar("MSE/improvement", init_mse - curr_mse, ep)
+    writer.add_scalar("Update/return_sum", total_r, update)
+    writer.add_scalar("Reward/info_gain_mean", float(np.mean(info_gain_buf)), update)
+    writer.add_scalar("Reward/info_gain_sum", float(np.sum(info_gain_buf)), update)
 
-    if ep % 10 == 0 or ep == 1:
-        print(f"Ep {ep:06d} | R:{total_r:.4f} | MSE:{curr_mse:.4f} | "
-              f"P/L:{policy_loss:.4f} | V/L:{value_loss:.4f} | "
-              f"Est/L:{estimation_loss:.4f} | LR:{current_lr:.2e}")
+    writer.add_scalar("Update/episodes_in_rollout", len(ep_final_mses), update)
+    writer.add_scalar("Loss/policy", float(np.mean(policy_losses)), update)
+    writer.add_scalar("Loss/value", float(np.mean(value_losses)), update)
+    writer.add_scalar("Loss/entropy_loss", float(np.mean(ent_loss_vals)), update)
+    writer.add_scalar("Policy/entropy", float(np.mean(ent_vals)), update)
+    writer.add_scalar("Loss/estimation", float(np.mean(est_losses)), update)
+    writer.add_scalar("Loss/total", float(np.mean(total_losses)), update)
 
-    # FIXED: Validation and best model tracking
-    if ep % validation_freq == 0:
-        if curr_mse < best_performance:
-            best_performance = curr_mse
-            torch.save({
-                'episode': ep,
-                'model_state_dict': agent.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'performance': curr_mse,
-                'reward': total_r
-            }, "BEST_SYMQNET_MODEL.pth")
-            print(f"→ New best model saved! MSE: {curr_mse:.6f}")
+    writer.add_scalar("LearningRate", current_lr, update)
+    writer.add_scalar("MSE/final_mean", avg_final_mse, update)
 
-    # Regular checkpoints
-    if ep % 10 == 0:
-        ckpt = {
-            'episode': ep,
-            'model_state_dict': agent.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'performance': curr_mse,
-            'reward': total_r
-        }
-        torch.save(ckpt, f"symqnet_fixed_ep{ep:07d}.pth")
-        print(f"→ Checkpoint saved: ep {ep}")
+    if update % 5 == 0 or update == 1:
+        print(
+            f"Upd {update:06d} | steps:{N} | eps:{len(ep_final_mses)} | "
+            f"Rsum:{total_r:.3f} | MSEmean:{avg_final_mse:.6f} | LR:{current_lr:.2e}"
+        )
 
-# 11) Final save
-torch.save({
-    'model_state_dict': agent.state_dict(),
-    'final_performance': curr_mse,
-    'episodes_trained': episodes
-}, "FINAL_FIXED_SYMQNET.pth")
+    # checkpoint on mean final MSE
+    if update % validation_freq == 0 and len(ep_final_mses):
+        if avg_final_mse < best_performance:
+            best_performance = avg_final_mse
+            torch.save(
+                {
+                    "update": update,
+                    "model_state_dict": agent.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "performance": best_performance,
+                    "rollout_steps": int(rollout_steps),
+                    "ppo_epochs": int(ppo_epochs),
+                    "minibatch_size": int(minibatch_size),
+                    "include_shots": True,
+                    "meta_dim": agent.meta_dim,
+                    "shots_encoding": {"type": "log2_norm", "shots_max": int(getattr(env, "shots_max", 1))},
+                    "n_qubits": int(n_qubits),
+                    "M_evo": int(env.M_evo),
+                },
+                "BEST_SYMQNET_MODEL_PPOV2.pth",
+            )
+            print(f"→ New best model saved! mean final MSE: {best_performance:.6f}")
 
-print("✅ FIXED training completed!")
-print(f"Best performance achieved: {best_performance:.6f}")
+print("✅ PPO v2 training completed!")
+print(f"Best mean-final-MSE achieved: {best_performance:.6f}")
 writer.close()
 

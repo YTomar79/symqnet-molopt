@@ -84,12 +84,12 @@ class PolicyEngine:
             self.M_evo = inferred_m_evo
             self.A = self.n_qubits * 3 * self.M_evo
 
-        default_meta_dim = self.n_qubits + 3 + self.M_evo + 1
+        default_meta_dim = self.n_qubits + 3 + self.M_evo
         self.meta_dim = self._infer_meta_dim(state_dict, base_latent_dim=64, default_meta_dim=default_meta_dim)
-        self.include_shots = self.meta_dim == default_meta_dim
-        if not self.include_shots and self.meta_dim == default_meta_dim - 1:
+        self.include_shots = self.meta_dim == default_meta_dim + 1
+        if not self.include_shots and self.meta_dim == default_meta_dim:
             logger.info("🔧 Checkpoint metadata excludes shot conditioning.")
-        elif not self.include_shots and self.meta_dim != default_meta_dim - 1:
+        elif not self.include_shots and self.meta_dim != default_meta_dim:
             logger.warning(
                 "⚠️ Unrecognized metadata size (%s); proceeding with include_shots=%s",
                 self.meta_dim,
@@ -99,7 +99,7 @@ class PolicyEngine:
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
         if is_simple_estimator:
-            logger.info("🎯 Detected simple estimator-only model")
+            logger.info("🎯 Detected estimator-only model; loading full architecture with partial weights")
             self._create_minimal_model(state_dict, self.n_qubits, self.M_evo, self.A, self.meta_dim)
         else:
             logger.info("🎯 Detected full trained model")
@@ -186,110 +186,18 @@ class PolicyEngine:
         return meta_dim
     
     def _create_minimal_model(self, state_dict, n_qubits, M_evo, A, meta_dim):
-        """Create minimal model matching training's estimator architecture."""
-        
-        estimator_keys = [key for key in state_dict.keys() if 'estimator' in key]
-        is_mlp_estimator = any('estimator.0.' in key or 'estimator.2.' in key or 'estimator.4.' in key 
-                              for key in estimator_keys)
-        
-        class MinimalSymQNet(nn.Module):
-            def __init__(self, vae, n_qubits, device, is_mlp, meta_dim):
-                super().__init__()
-                self.vae = vae
-                self.device = device
-                self.n_qubits = n_qubits
-                
-                input_dim = 64 + meta_dim  # VAE + metadata
-                output_dim = 2 * n_qubits - 1  # J + h parameters
-                
-                if is_mlp:
-                    self.estimator = nn.Sequential(
-                        nn.Linear(input_dim, 128),
-                        nn.ReLU(),
-                        nn.Linear(128, 64),
-                        nn.ReLU(),
-                        nn.Linear(64, output_dim)
-                    )
-                else:
-                    self.estimator = nn.Linear(input_dim, output_dim)
-                
-                self.step_count = 0
-                
-            def forward(self, obs, metadata, deterministic_inference: bool = False):
-                if obs.dim() == 1:
-                    obs = obs.unsqueeze(0)  # [10] -> [1, 10]
-                if metadata.dim() == 1:
-                    metadata = metadata.unsqueeze(0)  # [meta] -> [1, meta]
-                
-                # VAE encoding
-                with torch.no_grad():
-                    mu_z, logvar_z = self.vae.encode(obs)
-                    z = self.vae.sample_latent(
-                        mu_z,
-                        logvar_z,
-                        deterministic=deterministic_inference or not self.training,
-                    )  # [1, 64]
-                
-                # Concatenate with metadata
-                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, L + meta]
-                
-                # Estimate parameters
-                theta_hat = self.estimator(z_with_meta)  # [1, 2*n_qubits-1]
-                
-
-                theta_hat = theta_hat.squeeze(0)  # [1, 2*n_qubits-1] -> [2*n_qubits-1]
-                
-                # Create dummy policy outputs
-                action_probs = torch.ones(A, device=self.device) / A
-                dummy_dist = torch.distributions.Categorical(probs=action_probs)
-                dummy_value = torch.tensor(0.0, device=self.device)
-                
-                return dummy_dist, dummy_value, theta_hat
-            
-            def reset_buffer(self):
-                self.step_count = 0
-        
-        self.symqnet = MinimalSymQNet(
-            self.vae,
+        """Create full model architecture but allow partial weights for estimator-only checkpoints."""
+        self._create_full_model(
+            state_dict,
             n_qubits,
-            self.device,
-            is_mlp_estimator,
+            self.T,
+            A,
+            M_evo,
             meta_dim,
-        ).to(self.device)
-        self._load_estimator_weights(state_dict, is_mlp_estimator)
+            allow_partial=True,
+        )
     
-    def _load_estimator_weights(self, state_dict, is_mlp):
-        """Load estimator weights with exact key mapping."""
-        
-        estimator_state = {}
-        
-        if is_mlp:
-            for key, value in state_dict.items():
-                if 'estimator.' in key:
-                    new_key = key.replace('estimator.', '')
-                    estimator_state[new_key] = value
-        else:
-            for key, value in state_dict.items():
-                if key == 'estimator.weight':
-                    estimator_state['weight'] = value
-                elif key == 'estimator.bias':
-                    estimator_state['bias'] = value
-        
-        try:
-            self.symqnet.estimator.load_state_dict(estimator_state, strict=True)
-            logger.info(" Estimator weights loaded successfully")
-            
-            test_input = torch.randn(1, 64 + self.meta_dim, device=self.device)
-            with torch.no_grad():
-                test_output = self.symqnet.estimator(test_input)
-                logger.info(f" Estimator test output shape: {test_output.shape}")
-                logger.info(f" Estimator test output range: [{test_output.min():.4f}, {test_output.max():.4f}]")
-            
-        except Exception as e:
-            logger.warning(f" Estimator loading issue: {e}")
-            self.symqnet.estimator.load_state_dict(estimator_state, strict=False)
-    
-    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim):
+    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim, allow_partial: bool = False):
         """Create full model matching EXACT training architecture."""
         
         # EXACT graph connectivity from training
@@ -311,23 +219,20 @@ class PolicyEngine:
         ).to(self.device)
         
         # Load with architecture matching
-        try:
-            missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
-
-            if missing_keys or unexpected_keys:
-                mismatch_message = (
-                    "Full model load failed due to checkpoint mismatch. "
-                    f"Missing keys ({len(missing_keys)}): {missing_keys}. "
-                    f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys}."
-                )
+        missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
+        if missing_keys or unexpected_keys:
+            mismatch_message = (
+                "Full model load encountered checkpoint mismatch. "
+                f"Missing keys ({len(missing_keys)}): {missing_keys}. "
+                f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys}."
+            )
+            if allow_partial:
+                logger.warning(mismatch_message)
+            else:
                 logger.error(mismatch_message)
                 raise RuntimeError(mismatch_message)
 
-            logger.info("Full model loaded with correct dimensions")
-
-        except Exception as e:
-            logger.error(f" Full model loading failed: {e}")
-            raise
+        logger.info("Full model loaded with correct dimensions")
     
     def reset(self):
         """Reset policy state for new rollout."""
@@ -459,7 +364,7 @@ class PolicyEngine:
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0
 
-        if self.include_shots and metadata.numel() > (n_qubits + 3 + M_evo):
+        if self.include_shots and metadata.numel() > required_dim:
             metadata[-1] = self._normalize_shots()
 
         return metadata

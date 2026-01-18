@@ -163,6 +163,16 @@ class VariationalAutoencoder(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
+    def sample_latent(
+        self,
+        mu: torch.Tensor,
+        logvar: torch.Tensor,
+        deterministic: bool = False,
+    ) -> torch.Tensor:
+        if deterministic or not self.training:
+            return mu
+        return self.reparameterize(mu, logvar)
+
     def decode(self, z: torch.Tensor):
         h = F.relu(self.dec_fc1(z))
         h = F.relu(self.dec_fc2(h))
@@ -170,7 +180,7 @@ class VariationalAutoencoder(nn.Module):
 
     def forward(self, x: torch.Tensor):
         mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
+        z = self.sample_latent(mu, logvar)
         recon = self.decode(z)
         return recon, mu, logvar, z
 
@@ -510,7 +520,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.zG_history = []
         self.current_metadata = None
 
-    def forward(self, obs, metadata):
+    def forward(self, obs, metadata, deterministic_inference: bool = False):
         """Forward pass that properly uses metadata throughout"""
         # Store current metadata
         self.current_metadata = metadata
@@ -518,7 +528,11 @@ class FixedSymQNetWithEstimator(nn.Module):
         # Block 1: VAE encoding with metadata
         with torch.no_grad():
             mu_z, logvar_z = self.vae.encode(obs)
-            z = self.vae.reparameterize(mu_z, logvar_z)
+            z = self.vae.sample_latent(
+                mu_z,
+                logvar_z,
+                deterministic=deterministic_inference or not self.training,
+            )
         z_with_meta = torch.cat([z, metadata], dim=-1)
 
         # Block 2: Graph embedding

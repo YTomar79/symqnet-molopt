@@ -130,7 +130,7 @@ class PolicyEngine:
                 
                 self.step_count = 0
                 
-            def forward(self, obs, metadata):
+            def forward(self, obs, metadata, deterministic_inference: bool = False):
                 if obs.dim() == 1:
                     obs = obs.unsqueeze(0)  # [10] -> [1, 10]
                 if metadata.dim() == 1:
@@ -139,7 +139,11 @@ class PolicyEngine:
                 # VAE encoding
                 with torch.no_grad():
                     mu_z, logvar_z = self.vae.encode(obs)
-                    z = self.vae.reparameterize(mu_z, logvar_z)  # [1, 64]
+                    z = self.vae.sample_latent(
+                        mu_z,
+                        logvar_z,
+                        deterministic=deterministic_inference or not self.training,
+                    )  # [1, 64]
                 
                 # Concatenate with metadata
                 z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, 82]

@@ -84,9 +84,11 @@ class BootstrapEstimator:
         # Extract final parameter estimates from each rollout
         final_estimates = []
         convergence_steps = []
+        rollouts_with_nonzero = 0
         
         for i, estimate in enumerate(estimates):
             final_est = estimate.get('final_estimate')
+            rollout_has_nonzero = False
             
             if final_est is not None:
                 try:
@@ -99,6 +101,7 @@ class BootstrapEstimator:
                             final_estimates.append(final_array)
                             convergence_steps.append(estimate.get('convergence_step', 0))
                             logger.info(f" Rollout {i}: Valid final estimate with {final_array.size} parameters")
+                            rollout_has_nonzero = True
                         else:
                             logger.warning(f" Rollout {i}: final_estimate is all zeros - skipping")
                     else:
@@ -119,11 +122,37 @@ class BootstrapEstimator:
                                     final_estimates.append(pe_array)
                                     convergence_steps.append(len(param_ests))
                                     logger.info(f" Rollout {i}: Extracted from parameter_estimates")
+                                    rollout_has_nonzero = True
                                     break
                             except:
                                 continue
+                else:
+                    logger.warning(f" Rollout {i}: No parameter_estimates provided")
+
+            if not rollout_has_nonzero:
+                for pe in estimate.get('parameter_estimates', []) or []:
+                    try:
+                        pe_array = np.array(pe)
+                        if pe_array.size > 0 and not np.allclose(pe_array, 0, atol=1e-10):
+                            rollout_has_nonzero = True
+                            break
+                    except Exception:
+                        continue
+
+            if rollout_has_nonzero:
+                rollouts_with_nonzero += 1
         
         logger.info(f"🎯 SUMMARY: Found {len(final_estimates)} valid parameter estimates from {len(estimates)} rollouts")
+
+        if rollouts_with_nonzero == 0:
+            message = (
+                "All rollouts returned theta_estimate values that are all zeros. "
+                "This indicates inference is broken (model load mismatch, wrong input "
+                "shape, or corrupted weights). The MAE is not expected to vary with "
+                "shots until inference is fixed."
+            )
+            logger.error(message)
+            raise ValueError(message)
         
         if not final_estimates:
             logger.error(" NO VALID PARAMETER ESTIMATES FOUND!")

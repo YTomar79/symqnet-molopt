@@ -163,16 +163,6 @@ class VariationalAutoencoder(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def sample_latent(
-        self,
-        mu: torch.Tensor,
-        logvar: torch.Tensor,
-        deterministic: bool = False,
-    ) -> torch.Tensor:
-        if deterministic or not self.training:
-            return mu
-        return self.reparameterize(mu, logvar)
-
     def decode(self, z: torch.Tensor):
         h = F.relu(self.dec_fc1(z))
         h = F.relu(self.dec_fc2(h))
@@ -180,7 +170,7 @@ class VariationalAutoencoder(nn.Module):
 
     def forward(self, x: torch.Tensor):
         mu, logvar = self.encode(x)
-        z = self.sample_latent(mu, logvar)
+        z = self.reparameterize(mu, logvar)
         recon = self.decode(z)
         return recon, mu, logvar, z
 
@@ -578,7 +568,11 @@ class SpinChainEnv(gym.Env):
                  T=8,
                  noise_prob=0.02,
                  seed=None,
-                 device=torch.device("cpu")):
+                 device=torch.device("cpu"),
+                 resample_each_reset=True,
+                 resample_every=1,
+                 J_range=(0.5, 1.5),
+                 h_range=(0.5, 1.5)):
         super().__init__()
         self.N         = N
         self.M_evo     = M_evo
@@ -587,12 +581,14 @@ class SpinChainEnv(gym.Env):
         self.step_count= 0
         self.device    = device
 
+        self.resample_each_reset = resample_each_reset
+        self.resample_every = int(resample_every)
+        self.J_range = J_range
+        self.h_range = h_range
+        self._episode_counter = 0
+
         # Discrete evolution times
         self.times = np.linspace(0.1, 1.0, M_evo)
-
-        # True Hamiltonian parameters
-        self.J_true = np.random.uniform(0.5, 1.5, size=(N - 1,))
-        self.h_true = np.random.uniform(0.5, 1.5, size=(N,))
 
         # Pauli & identity on single qubit
         self.Z = torch.tensor([[1,0],[0,-1]], dtype=torch.complex128, device=device)
@@ -600,15 +596,6 @@ class SpinChainEnv(gym.Env):
         self.H = (1/np.sqrt(2)) * torch.tensor([[1,1],[1,-1]], dtype=torch.complex128, device=device)
         self.Sdg = torch.tensor([[1,0],[0,-1j]], dtype=torch.complex128, device=device)
         self.I = torch.eye(2, dtype=torch.complex128, device=device)
-
-        # Build full many-body Hamiltonian
-        self.H_true = self._build_hamiltonian(self.J_true, self.h_true).to(device)
-
-        # Precompute all evolution unitaries
-        self.U_list = [
-            torch.matrix_exp(-1j * self.H_true * tau).to(device)
-            for tau in self.times
-        ]
 
         # Precompute single-qubit readout rotations
         self.UX_list = []
@@ -640,6 +627,7 @@ class SpinChainEnv(gym.Env):
         if seed is not None:
             self.seed(seed)
 
+        self._resample_task()
         self.prev_mse = None
 
     def seed(self, seed: int):
@@ -673,10 +661,25 @@ class SpinChainEnv(gym.Env):
             H = H + h[i] * term
         return H
 
+    def _resample_task(self):
+        self.J_true = np.random.uniform(*self.J_range, size=(self.N - 1,))
+        self.h_true = np.random.uniform(*self.h_range, size=(self.N,))
+        self.H_true = self._build_hamiltonian(self.J_true, self.h_true).to(self.device)
+
+        self.U_list = [
+            torch.matrix_exp(-1j * self.H_true * tau).to(self.device)
+            for tau in self.times
+        ]
+
     def reset(self):
         self.step_count = 0
         self.prev_mse   = None
-        return self._measure(self.psi0, basis='Z', qubit_idx=None)
+
+        self._episode_counter += 1
+        if self.resample_each_reset and ((self._episode_counter - 1) % self.resample_every == 0):
+            self._resample_task()
+
+        return np.zeros(self.N, dtype=np.float32)
 
     def _measure(self, psi, basis, qubit_idx):
         # rotate into measurement basis

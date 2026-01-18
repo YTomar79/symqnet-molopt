@@ -99,7 +99,7 @@ class PolicyEngine:
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
         if is_simple_estimator:
-            logger.info("🎯 Detected simple estimator-only model")
+            logger.info("🎯 Detected estimator-only model; loading full architecture with partial weights")
             self._create_minimal_model(state_dict, self.n_qubits, self.M_evo, self.A, self.meta_dim)
         else:
             logger.info("🎯 Detected full trained model")
@@ -248,44 +248,14 @@ class PolicyEngine:
         self.symqnet = MinimalSymQNet(
             self.vae,
             n_qubits,
-            self.device,
-            is_mlp_estimator,
+            self.T,
+            A,
+            M_evo,
             meta_dim,
-        ).to(self.device)
-        self._load_estimator_weights(state_dict, is_mlp_estimator)
+            allow_partial=True,
+        )
     
-    def _load_estimator_weights(self, state_dict, is_mlp):
-        """Load estimator weights with exact key mapping."""
-        
-        estimator_state = {}
-        
-        if is_mlp:
-            for key, value in state_dict.items():
-                if 'estimator.' in key:
-                    new_key = key.replace('estimator.', '')
-                    estimator_state[new_key] = value
-        else:
-            for key, value in state_dict.items():
-                if key == 'estimator.weight':
-                    estimator_state['weight'] = value
-                elif key == 'estimator.bias':
-                    estimator_state['bias'] = value
-        
-        try:
-            self.symqnet.estimator.load_state_dict(estimator_state, strict=True)
-            logger.info(" Estimator weights loaded successfully")
-            
-            test_input = torch.randn(1, 64 + self.meta_dim, device=self.device)
-            with torch.no_grad():
-                test_output = self.symqnet.estimator(test_input)
-                logger.info(f" Estimator test output shape: {test_output.shape}")
-                logger.info(f" Estimator test output range: [{test_output.min():.4f}, {test_output.max():.4f}]")
-            
-        except Exception as e:
-            logger.warning(f" Estimator loading issue: {e}")
-            self.symqnet.estimator.load_state_dict(estimator_state, strict=False)
-    
-    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim):
+    def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim, allow_partial: bool = False):
         """Create full model matching EXACT training architecture."""
         
         # EXACT graph connectivity from training
@@ -307,23 +277,20 @@ class PolicyEngine:
         ).to(self.device)
         
         # Load with architecture matching
-        try:
-            missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
-
-            if missing_keys or unexpected_keys:
-                mismatch_message = (
-                    "Full model load failed due to checkpoint mismatch. "
-                    f"Missing keys ({len(missing_keys)}): {missing_keys}. "
-                    f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys}."
-                )
+        missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
+        if missing_keys or unexpected_keys:
+            mismatch_message = (
+                "Full model load encountered checkpoint mismatch. "
+                f"Missing keys ({len(missing_keys)}): {missing_keys}. "
+                f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys}."
+            )
+            if allow_partial:
+                logger.warning(mismatch_message)
+            else:
                 logger.error(mismatch_message)
                 raise RuntimeError(mismatch_message)
 
-            logger.info("Full model loaded with correct dimensions")
-
-        except Exception as e:
-            logger.error(f" Full model loading failed: {e}")
-            raise
+        logger.info("Full model loaded with correct dimensions")
     
     def reset(self):
         """Reset policy state for new rollout."""

@@ -230,14 +230,18 @@ class PolicyEngine:
         # Load with architecture matching
         try:
             missing_keys, unexpected_keys = self.symqnet.load_state_dict(state_dict, strict=False)
-            
-            if missing_keys:
-                logger.warning(f"Missing {len(missing_keys)} keys: {missing_keys[:5]}...")
-            if unexpected_keys:
-                logger.warning(f"Unexpected {len(unexpected_keys)} keys: {unexpected_keys[:5]}...")
-            
+
+            if missing_keys or unexpected_keys:
+                mismatch_message = (
+                    "Full model load failed due to checkpoint mismatch. "
+                    f"Missing keys ({len(missing_keys)}): {missing_keys}. "
+                    f"Unexpected keys ({len(unexpected_keys)}): {unexpected_keys}."
+                )
+                logger.error(mismatch_message)
+                raise RuntimeError(mismatch_message)
+
             logger.info("Full model loaded with correct dimensions")
-            
+
         except Exception as e:
             logger.error(f" Full model loading failed: {e}")
             raise

@@ -186,9 +186,67 @@ class PolicyEngine:
         return meta_dim
     
     def _create_minimal_model(self, state_dict, n_qubits, M_evo, A, meta_dim):
-        """Create full model architecture but allow partial weights for estimator-only checkpoints."""
-        self._create_full_model(
-            state_dict,
+        """Create minimal model matching training's estimator architecture."""
+        
+        estimator_keys = [key for key in state_dict.keys() if 'estimator' in key]
+        is_mlp_estimator = any('estimator.0.' in key or 'estimator.2.' in key or 'estimator.4.' in key 
+                              for key in estimator_keys)
+        
+        class MinimalSymQNet(nn.Module):
+            def __init__(self, vae, n_qubits, device, is_mlp, meta_dim):
+                super().__init__()
+                self.vae = vae
+                self.device = device
+                self.n_qubits = n_qubits
+                
+                input_dim = 64 + meta_dim  # VAE + metadata
+                output_dim = 2 * n_qubits - 1  # J + h parameters
+                
+                if is_mlp:
+                    self.estimator = nn.Sequential(
+                        nn.Linear(input_dim, 128),
+                        nn.ReLU(),
+                        nn.Linear(128, 64),
+                        nn.ReLU(),
+                        nn.Linear(64, output_dim)
+                    )
+                else:
+                    self.estimator = nn.Linear(input_dim, output_dim)
+                
+                self.step_count = 0
+                
+            def forward(self, obs, metadata, deterministic_inference: bool = False):
+                if obs.dim() == 1:
+                    obs = obs.unsqueeze(0)  # [10] -> [1, 10]
+                if metadata.dim() == 1:
+                    metadata = metadata.unsqueeze(0)  # [meta] -> [1, meta]
+                
+                # VAE encoding
+                with torch.no_grad():
+                    mu_z, logvar_z = self.vae.encode(obs)
+                    z = self.vae.reparameterize(mu_z, logvar_z)  # [1, 64]
+                
+                # Concatenate with metadata
+                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, L + meta]
+                
+                # Estimate parameters
+                theta_hat = self.estimator(z_with_meta)  # [1, 2*n_qubits-1]
+                
+
+                theta_hat = theta_hat.squeeze(0)  # [1, 2*n_qubits-1] -> [2*n_qubits-1]
+                
+                # Create dummy policy outputs
+                action_probs = torch.ones(A, device=self.device) / A
+                dummy_dist = torch.distributions.Categorical(probs=action_probs)
+                dummy_value = torch.tensor(0.0, device=self.device)
+                
+                return dummy_dist, dummy_value, theta_hat
+            
+            def reset_buffer(self):
+                self.step_count = 0
+        
+        self.symqnet = MinimalSymQNet(
+            self.vae,
             n_qubits,
             self.T,
             A,

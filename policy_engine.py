@@ -21,6 +21,10 @@ from architectures import (
 
 logger = logging.getLogger(__name__)
 
+
+class InferenceError(RuntimeError):
+    """Raised when policy inference fails and rollouts should abort."""
+
 class PolicyEngine:
     """Integrates trained SymQNet for molecular Hamiltonian estimation."""
     
@@ -291,7 +295,7 @@ class PolicyEngine:
                     logger.warning(f" All parameters are zero at step {self.step_count}")
                     self.zero_theta_steps += 1
                     if self.zero_theta_steps >= 3:
-                        raise RuntimeError(
+                        raise InferenceError(
                             "theta_estimate has been all zeros for multiple steps. "
                             "This indicates inference is broken (model load mismatch, "
                             "wrong input shape, or corrupted weights). The MAE is not "
@@ -308,13 +312,16 @@ class PolicyEngine:
                 action_info = self._decode_action(action_idx)
                 
         except Exception as e:
-            if isinstance(e, RuntimeError) and "theta_estimate has been all zeros" in str(e):
+            if isinstance(e, InferenceError):
                 raise
-            logger.error(f" Error in get_action: {e}")
-            # Fallback: use dummy parameters
-            theta_np = np.zeros(19)
-            self.parameter_history.append(theta_np)
-            action_info = {'qubits': [0], 'operators': ['Z'], 'time': 0.5}
+            logger.exception(" Error in get_action: inference failed.", exc_info=e)
+            logger.error(
+                "Inference failure detected; MAE will be invalid if inference is broken."
+            )
+            raise InferenceError(
+                "Inference failed in PolicyEngine.get_action; aborting rollout. "
+                "MAE will be invalid if inference is broken."
+            ) from e
         
         self.step_count += 1
         return action_info

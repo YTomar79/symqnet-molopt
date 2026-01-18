@@ -336,8 +336,8 @@ class PolicyEngine:
         self.step_count = 0
         self.parameter_history = []
         self.zero_theta_steps = 0
-        self.convergence_threshold = 1e-4
-        self.convergence_window = 5
+        self.convergence_threshold = 1e-7
+        self.convergence_window = 10
         self.last_action = None
         
         logger.debug(" Policy engine state reset")

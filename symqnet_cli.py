@@ -23,7 +23,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Core imports (always available)
 from hamiltonian_parser import HamiltonianParser
 from measurement_simulator import MeasurementSimulator
-from policy_engine import PolicyEngine
+from policy_engine import PolicyEngine, InferenceError
 from bootstrap_estimator import BootstrapEstimator
 from utils import setup_logging, validate_inputs, save_results
 
@@ -267,54 +267,72 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         
         # Step 3: Run rollouts with the WORKING logic
         rollout_results = []
-        for i in range(n_rollouts):
-            logger.info(f" Universal rollout {i+1}/{n_rollouts}")
-            policy.reset()
-            
-            measurements = []
-            parameter_estimates = []
-            current_measurement = simulator.get_initial_measurement()
-            
-            for step in range(max_steps):
-                #  THIS IS THE WORKING LOGIC FROM FALLBACK MODE
-                action_info = policy.get_action(current_measurement)
-                measurement_result = simulator.execute_measurement(
-                    qubit_indices=action_info['qubits'],
-                    pauli_operators=action_info['operators'],
-                    evolution_time=action_info['time']
-                )
+        try:
+            for i in range(n_rollouts):
+                logger.info(f" Universal rollout {i+1}/{n_rollouts}")
+                policy.reset()
                 
-                measurements.append(measurement_result)
+                measurements = []
+                parameter_estimates = []
+                current_measurement = simulator.get_initial_measurement()
                 
-                #  This call actually works!
-                param_estimate = policy.get_parameter_estimate()
-                parameter_estimates.append(param_estimate)
+                for step in range(max_steps):
+                    #  THIS IS THE WORKING LOGIC FROM FALLBACK MODE
+                    action_info = policy.get_action(current_measurement)
+                    measurement_result = simulator.execute_measurement(
+                        qubit_indices=action_info['qubits'],
+                        pauli_operators=action_info['operators'],
+                        evolution_time=action_info['time']
+                    )
+                    
+                    measurements.append(measurement_result)
+                    
+                    #  This call actually works!
+                    param_estimate = policy.get_parameter_estimate()
+                    parameter_estimates.append(param_estimate)
+                    
+                    current_measurement = measurement_result['expectation_values']
+                    
+                    # Debug: Check if we're getting real parameters
+                    if step == 0:
+                        logger.debug(f" First parameter estimate: shape={param_estimate.shape}, "
+                                    f"range=[{param_estimate.min():.6f}, {param_estimate.max():.6f}]")
+                    
+                    if step > 5 and policy.has_converged(parameter_estimates):
+                        logger.debug(f"Converged at step {step}")
+                        break
                 
-                current_measurement = measurement_result['expectation_values']
+                # Store rollout results
+                rollout_results.append({
+                    'rollout_id': i,
+                    'measurements': measurements,
+                    'parameter_estimates': parameter_estimates,
+                    'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
+                    'convergence_step': step
+                })
                 
-                # Debug: Check if we're getting real parameters
-                if step == 0:
-                    logger.debug(f" First parameter estimate: shape={param_estimate.shape}, "
-                                f"range=[{param_estimate.min():.6f}, {param_estimate.max():.6f}]")
-                
-                if step > 5 and policy.has_converged(parameter_estimates):
-                    logger.debug(f"Converged at step {step}")
-                    break
-            
-            # Store rollout results
-            rollout_results.append({
-                'rollout_id': i,
-                'measurements': measurements,
-                'parameter_estimates': parameter_estimates,
-                'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
-                'convergence_step': step
-            })
-            
-            # Debug final estimate
-            if parameter_estimates:
-                final_est = parameter_estimates[-1]
-                logger.debug(f"Rollout {i} final estimate: shape={final_est.shape}, "
-                           f"non-zero: {not np.allclose(final_est, 0)}")
+                # Debug final estimate
+                if parameter_estimates:
+                    final_est = parameter_estimates[-1]
+                    logger.debug(f"Rollout {i} final estimate: shape={final_est.shape}, "
+                               f"non-zero: {not np.allclose(final_est, 0)}")
+        except InferenceError as e:
+            logger.error(f"Aborting optimization due to inference failure: {e}")
+            logger.error("MAE will be invalid if inference is broken.")
+            return {
+                'symqnet_results': None,
+                'rollout_results': rollout_results,
+                'error': {
+                    'type': type(e).__name__,
+                    'message': str(e),
+                },
+                'aborted': True,
+                'universal_metadata': {
+                    'original_qubits': original_qubits,
+                    'normalized_to': 10,
+                    'normalization_applied': True,
+                }
+            }
         
         # Step 4: Bootstrap analysis on 10-qubit results
         logger.info("📊 Computing confidence intervals on normalized results...")
@@ -352,35 +370,49 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         
         # Run rollouts
         rollout_results = []
-        for i in range(n_rollouts):
-            logger.info(f"  Rollout {i+1}/{n_rollouts}")
-            policy.reset()
-            
-            measurements = []
-            parameter_estimates = []
-            current_measurement = simulator.get_initial_measurement()
-            
-            for step in range(max_steps):
-                action_info = policy.get_action(current_measurement)
-                measurement_result = simulator.execute_measurement(
-                    qubit_indices=action_info['qubits'],
-                    pauli_operators=action_info['operators'],
-                    evolution_time=action_info['time']
-                )
+        try:
+            for i in range(n_rollouts):
+                logger.info(f"  Rollout {i+1}/{n_rollouts}")
+                policy.reset()
                 
-                measurements.append(measurement_result)
-                param_estimate = policy.get_parameter_estimate()
-                parameter_estimates.append(param_estimate)
-                current_measurement = measurement_result['expectation_values']
+                measurements = []
+                parameter_estimates = []
+                current_measurement = simulator.get_initial_measurement()
                 
-                if step > 5 and policy.has_converged(parameter_estimates):
-                    break
-            
-            rollout_results.append({
-                'rollout_id': i,
-                'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
-                'convergence_step': step
-            })
+                for step in range(max_steps):
+                    action_info = policy.get_action(current_measurement)
+                    measurement_result = simulator.execute_measurement(
+                        qubit_indices=action_info['qubits'],
+                        pauli_operators=action_info['operators'],
+                        evolution_time=action_info['time']
+                    )
+                    
+                    measurements.append(measurement_result)
+                    param_estimate = policy.get_parameter_estimate()
+                    parameter_estimates.append(param_estimate)
+                    current_measurement = measurement_result['expectation_values']
+                    
+                    if step > 5 and policy.has_converged(parameter_estimates):
+                        break
+                
+                rollout_results.append({
+                    'rollout_id': i,
+                    'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
+                    'convergence_step': step
+                })
+        except InferenceError as e:
+            logger.error(f"Aborting optimization due to inference failure: {e}")
+            logger.error("MAE will be invalid if inference is broken.")
+            return {
+                'symqnet_results': None,
+                'rollout_results': rollout_results,
+                'error': {
+                    'type': type(e).__name__,
+                    'message': str(e),
+                },
+                'aborted': True,
+                'fallback_mode': True
+            }
         
         # Bootstrap analysis
         logger.info(" Computing confidence intervals...")

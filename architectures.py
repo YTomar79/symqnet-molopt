@@ -482,7 +482,7 @@ class PolicyValueHead(nn.Module):
 class FixedSymQNetWithEstimator(nn.Module):
     """SymQNet that should be able to properly integrate all 4 blocks with metadata"""
 
-    def __init__(self, vae, n_qubits, L, edge_index, edge_attr, T, A, M_evo, K_gnn=2):
+    def __init__(self, vae, n_qubits, L, edge_index, edge_attr, T, A, M_evo, K_gnn=2, meta_dim=None):
         super().__init__()
         self.vae = vae
         self.n_qubits = n_qubits
@@ -492,7 +492,9 @@ class FixedSymQNetWithEstimator(nn.Module):
         self.M_evo = M_evo
 
         # Metadata dimensions
-        self.meta_dim = n_qubits + 3 + M_evo + 1
+        if meta_dim is None:
+            meta_dim = n_qubits + 3 + M_evo + 1
+        self.meta_dim = meta_dim
 
         # Block 1: Graph embedding (operates on latent + metadata)
         self.graph_embed = GraphEmbed(

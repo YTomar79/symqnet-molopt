@@ -493,7 +493,7 @@ class FixedSymQNetWithEstimator(nn.Module):
 
         # Metadata dimensions
         if meta_dim is None:
-            meta_dim = n_qubits + 3 + M_evo + 1
+            meta_dim = n_qubits + 3 + M_evo
         self.meta_dim = meta_dim
 
         # Block 1: Graph embedding (operates on latent + metadata)
@@ -507,7 +507,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         )
 
         # Block 2: Temporal aggregation
-        self.temp_agg = TemporalContextualAggregator(L + self.meta_dim, T, num_heads=1)
+        self.temp_agg = TemporalContextualAggregator(L + self.meta_dim, T)
 
         # Block 3: Policy-Value head
         self.policy_value = PolicyValueHead(L + self.meta_dim, A)
@@ -538,11 +538,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         # Block 1: VAE encoding with metadata
         with torch.no_grad():
             mu_z, logvar_z = self.vae.encode(obs)
-            z = self.vae.sample_latent(
-                mu_z,
-                logvar_z,
-                deterministic=deterministic_inference or not self.training,
-            )
+            z = self.vae.reparameterize(mu_z, logvar_z)
         z_with_meta = torch.cat([z, metadata], dim=-1)
 
         # Block 2: Graph embedding

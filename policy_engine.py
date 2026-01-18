@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 class PolicyEngine:
     """Integrates trained SymQNet for molecular Hamiltonian estimation."""
     
-    def __init__(self, model_path: Path, vae_path: Path, device: torch.device):
+    def __init__(self, model_path: Path, vae_path: Path, device: torch.device, shots: Optional[int] = None):
         self.device = device
         self.model_path = model_path
         self.vae_path = vae_path
+        self.shots = shots
         
         # Load models
         self._load_models()
@@ -36,6 +37,10 @@ class PolicyEngine:
         self.reset()
         
         logger.info("Policy engine initialized successfully")
+
+    def set_shots(self, shots: Optional[int]) -> None:
+        """Update the shot budget for metadata conditioning."""
+        self.shots = shots
     
     def _load_models(self):
         """Load pre-trained VAE and SymQNet models with EXACT architecture matching."""
@@ -114,7 +119,7 @@ class PolicyEngine:
                 self.device = device
                 self.n_qubits = n_qubits
                 
-                input_dim = 64 + 18  # VAE + metadata = 82
+                input_dim = 64 + 19  # VAE + metadata = 83
                 output_dim = 2 * n_qubits - 1  # 19 parameters
                 
                 if is_mlp:
@@ -134,7 +139,7 @@ class PolicyEngine:
                 if obs.dim() == 1:
                     obs = obs.unsqueeze(0)  # [10] -> [1, 10]
                 if metadata.dim() == 1:
-                    metadata = metadata.unsqueeze(0)  # [18] -> [1, 18]
+                    metadata = metadata.unsqueeze(0)  # [19] -> [1, 19]
                 
                 # VAE encoding
                 with torch.no_grad():
@@ -146,7 +151,7 @@ class PolicyEngine:
                     )  # [1, 64]
                 
                 # Concatenate with metadata
-                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, 82]
+                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, 83]
                 
                 # Estimate parameters
                 theta_hat = self.estimator(z_with_meta)  # [1, 19]
@@ -188,7 +193,7 @@ class PolicyEngine:
             self.symqnet.estimator.load_state_dict(estimator_state, strict=True)
             logger.info(" Estimator weights loaded successfully")
             
-            test_input = torch.randn(1, 82, device=self.device)
+            test_input = torch.randn(1, 83, device=self.device)
             with torch.no_grad():
                 test_output = self.symqnet.estimator(test_input)
                 logger.info(f" Estimator test output shape: {test_output.shape}")
@@ -318,7 +323,7 @@ class PolicyEngine:
         """Create metadata tensor EXACTLY as in training."""
         n_qubits = 10
         M_evo = 5
-        meta_dim = n_qubits + 3 + M_evo  # 18
+        meta_dim = n_qubits + 3 + M_evo + 1  # 19
         
         metadata = torch.zeros(meta_dim, device=self.device)
         
@@ -330,6 +335,10 @@ class PolicyEngine:
             metadata[qi] = 1.0
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0
+
+        shots = self.shots or 0
+        if shots > 0:
+            metadata[-1] = float(np.log1p(shots) / np.log1p(1024))
         
         return metadata
     

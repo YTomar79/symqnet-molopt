@@ -261,7 +261,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         logger.info(f"🔄 Normalized {original_qubits}-qubit → 10-qubit system")
         
         # Step 2: Use the PROVEN WORKING rollout logic on normalized system
-        policy = PolicyEngine(model_path, vae_path, device)
+        policy = PolicyEngine(model_path, vae_path, device, shots=shots)
         simulator = MeasurementSimulator(normalized_hamiltonian, shots, device)
         estimator = BootstrapEstimator()
         
@@ -346,7 +346,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         logger.info("🔧 Using fallback 10-qubit implementation")
         
         # Initialize components directly
-        policy = PolicyEngine(model_path, vae_path, device)
+        policy = PolicyEngine(model_path, vae_path, device, shots=shots)
         simulator = MeasurementSimulator(hamiltonian_data, shots, device)
         estimator = BootstrapEstimator()
         

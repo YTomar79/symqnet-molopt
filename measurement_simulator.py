@@ -107,7 +107,8 @@ class MeasurementSimulator:
         psi0[0] = 1.0
         
         # Measure all qubits in Z basis (individual measurements)
-        return self._measure_state_individual(psi0, ['Z'] * self.n_qubits)
+        expectations = self._measure_state_individual(psi0, ['Z'] * self.n_qubits)
+        return self._add_shot_noise(expectations)
     
     def get_thermal_initial_measurement(self, temperature: float = 0.1) -> np.ndarray:
         """Get thermal initial state for more realistic simulation."""

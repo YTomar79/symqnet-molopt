@@ -290,10 +290,16 @@ class PolicyEngine:
                     theta_estimate = torch.zeros(19, device=self.device)
                 
                 # Convert to numpy and validate
-                theta_np = theta_estimate.cpu().numpy()
-                
-                if theta_np.shape[0] != 19:
-                    logger.error(f" Wrong parameter count: {theta_np.shape[0]} != 19")
+                theta_np = theta_estimate.detach().cpu().numpy()
+
+                if theta_np.ndim > 1:
+                    theta_np = np.squeeze(theta_np)
+
+                if theta_np.size == 19 and theta_np.shape != (19,):
+                    theta_np = theta_np.reshape(19)
+
+                if theta_np.shape != (19,):
+                    logger.error(f" Wrong parameter shape: {theta_np.shape} (size={theta_np.size})")
                     theta_np = np.zeros(19)
                 
                 if np.allclose(theta_np, 0, atol=1e-10):

@@ -297,6 +297,12 @@ class TemporalContextualAggregator(nn.Module):
         super().__init__()
         self.L = L
         self.T = T
+        if num_heads is None or num_heads <= 0:
+            raise ValueError("num_heads must be a positive integer that divides L.")
+        if L % num_heads != 0:
+            raise ValueError(
+                f"num_heads ({num_heads}) must divide L ({L}) for multi-head attention."
+            )
 
         # Causal TCN layers
         self.conv1 = nn.Conv1d(L, L, kernel_size=2, dilation=1, padding=0)
@@ -308,10 +314,12 @@ class TemporalContextualAggregator(nn.Module):
         self.drop2 = nn.Dropout(dropout)
 
         # Multi‐head self‐attention
-        self.attn = nn.MultiheadAttention(embed_dim=L,
-                                         num_heads=num_heads,
-                                         batch_first=True,
-                                         dropout=dropout)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=L,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
 
         # Final projection
         self.out = nn.Sequential(
@@ -497,7 +505,7 @@ class FixedSymQNetWithEstimator(nn.Module):
         )
 
         # Block 2: Temporal aggregation
-        self.temp_agg = TemporalContextualAggregator(L + self.meta_dim, T)
+        self.temp_agg = TemporalContextualAggregator(L + self.meta_dim, T, num_heads=1)
 
         # Block 3: Policy-Value head
         self.policy_value = PolicyValueHead(L + self.meta_dim, A)

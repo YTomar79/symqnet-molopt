@@ -27,7 +27,7 @@ class UniversalSymQNetWrapper:
         self.device = device
         self.trained_qubits = 10 
         self.vae_latent = 64     
-        self.metadata_dim = 18   # 10 + 3 + 5
+        self.metadata_dim = 84   # action + shots + belief features
         self.M_evo = 5          
         
         # Store paths

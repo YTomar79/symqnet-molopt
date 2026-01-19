@@ -199,7 +199,7 @@ def validate_model_loading():
         symqnet = FixedSymQNetWithEstimator(
             vae=vae,
             n_qubits=n_qubits,
-            L=L,  # need to use L=64, not L=82
+            L=L,  # need to use L=64, not L=148
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,
@@ -218,13 +218,13 @@ def validate_model_loading():
         
         # Test forward pass
         obs = torch.randn(10)
-        metadata = torch.zeros(18)  # n_qubits + 3 + M_evo
+        metadata = torch.zeros(84)  # action + shots + belief features
         
         with torch.no_grad():
-            dist, value, theta_hat = symqnet(obs, metadata)
+            dist, value = symqnet(obs, metadata)
         
         symqnet_ok = True
-        print_result("SymQNet model loading", True, f"Params: {theta_hat.shape}")
+        print_result("SymQNet model loading", True, f"Value: {value.shape}")
         
     except Exception as e:
         print_result("SymQNet model loading", False, str(e))

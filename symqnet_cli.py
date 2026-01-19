@@ -44,6 +44,7 @@ from utils import setup_logging, validate_inputs, save_results
 
 #GRACEFUL IMPORT HANDLING FOR Uni COMPONENTS
 UNIVERSAL_MODE = False
+DEFAULT_TRAINED_QUBITS = 10
 try:
     from universal_wrapper import UniversalSymQNetWrapper
     from performance_estimator import PerformanceEstimator, get_performance_warning
@@ -53,7 +54,7 @@ try:
 except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning(f" Universal components not available: {e}")
-    logger.warning("🔧Falling back to 10-qubit-only mode")
+    logger.warning(f"🔧Falling back to {DEFAULT_TRAINED_QUBITS}-qubit-only mode")
     
     # Fallback implementations
     class PerformanceEstimator:
@@ -63,6 +64,8 @@ except ImportError as e:
         def estimate_performance(self, n_qubits):
             from dataclasses import dataclass
             from enum import Enum
+
+            optimal_qubits = self.optimal_qubits
             
             class PerformanceLevel(Enum):
                 OPTIMAL = "optimal"
@@ -70,14 +73,16 @@ except ImportError as e:
             
             @dataclass
             class PerformanceReport:
-                performance_factor: float = 1.0 if n_qubits == 10 else 0.0
-                level: PerformanceLevel = PerformanceLevel.OPTIMAL if n_qubits == 10 else PerformanceLevel.POOR
+                performance_factor: float = 1.0 if n_qubits == optimal_qubits else 0.0
+                level: PerformanceLevel = (
+                    PerformanceLevel.OPTIMAL if n_qubits == optimal_qubits else PerformanceLevel.POOR
+                )
                 recommendations: List[str] = None
                 
                 def __post_init__(self):
                     if self.recommendations is None:
-                        if n_qubits != 10:
-                            self.recommendations = [f"Use exactly 10-qubit systems for this version"]
+                        if n_qubits != optimal_qubits:
+                            self.recommendations = [f"Use exactly {optimal_qubits}-qubit systems for this version"]
                         else:
                             self.recommendations = []
             
@@ -283,7 +288,7 @@ def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
         f"Use 'symqnet-add {hamiltonian_path}' to add your file to the system."
     )
 
-def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
+def validate_hamiltonian_universal(hamiltonian_path: Path, optimal_qubits: int) -> Dict[str, any]:
     """Validate Hamiltonian with universal support or fallback"""
     
     try:
@@ -304,15 +309,15 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
             logger.info(f" Validated: {n_qubits}-qubit Hamiltonian (Universal mode)")
             
         else:
-            # Fallback mode - only 10 qubits
-            if n_qubits != 10:
+            # Fallback mode - only trained qubits
+            if n_qubits != optimal_qubits:
                 raise ValueError(
-                    f" FALLBACK MODE: Only 10-qubit systems supported.\n"
+                    f" FALLBACK MODE: Only {optimal_qubits}-qubit systems supported.\n"
                     f"   Your Hamiltonian: {n_qubits} qubits\n"
-                    f"   Required: exactly 10 qubits\n\n"
+                    f"   Required: exactly {optimal_qubits} qubits\n\n"
                     f"💡 To enable universal support:\n"
                     f"   • Install universal components (universal_wrapper.py, performance_estimator.py)\n"
-                    f"   • Or use a 10-qubit molecular representation"
+                    f"   • Or use a {optimal_qubits}-qubit molecular representation"
                 )
             
             logger.info(f" Validated: {n_qubits}-qubit Hamiltonian (Fallback mode)")
@@ -324,7 +329,8 @@ def validate_hamiltonian_universal(hamiltonian_path: Path) -> Dict[str, any]:
     except FileNotFoundError:
         raise ValueError(f"Hamiltonian file not found: {hamiltonian_path}")
 
-def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, shots, n_rollouts, max_steps, warn_performance=True):
+def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, shots, n_rollouts, max_steps,
+                               warn_performance=True, trained_qubits: int = DEFAULT_TRAINED_QUBITS):
     """
     Run optimization with working parameter extraction
     Uses proven rollout logic for both universal and fallback modes
@@ -403,7 +409,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
     
     else:
         # Fallback to original implementation (this already works)
-        logger.info("🔧 Using fallback 10-qubit implementation")
+        logger.info(f"🔧 Using fallback {trained_qubits}-qubit implementation")
         
         # Initialize components directly
         policy = PolicyEngine(model_path, vae_path, device, shots=shots)
@@ -469,7 +475,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
             'fallback_mode': True
         }
 
-def print_performance_info(n_qubits: int, performance_estimator: PerformanceEstimator):
+def print_performance_info(n_qubits: int, performance_estimator: PerformanceEstimator, optimal_qubits: int):
     """Print performance information and recommendations"""
     
     print("\n" + "="*60)
@@ -480,11 +486,12 @@ def print_performance_info(n_qubits: int, performance_estimator: PerformanceEsti
 
     
     report = performance_estimator.estimate_performance(n_qubits)
+    print(f" Optimal training size: {optimal_qubits} qubits")
     
     
 
 def print_summary(results: Dict, n_qubits: int, performance_factor: float,
-                  requested_shots: int, shots_used: int):
+                  requested_shots: int, shots_used: int, optimal_qubits: int):
     """Print a formatted summary of results with performance context."""
     
 
@@ -492,6 +499,7 @@ def print_summary(results: Dict, n_qubits: int, performance_factor: float,
 
     
     print(f" System: {n_qubits} qubits")
+    print(f" Optimal training size: {optimal_qubits} qubits")
     print(f" Shots: requested={requested_shots}, used={shots_used}")
 
     
@@ -635,7 +643,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     SymQNet Molecular Optimization CLI
     
      support (any qubit count) with WORKING parameter extraction
-     Fallback to 10-qubit-only mode if universal components unavailable
+     Fallback to trained-qubit-only mode if universal components unavailable
      Checkpoint metadata expectations: meta_dim and optional shots_encoding
 
     Metadata slots:
@@ -660,13 +668,14 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     
     setup_logging(verbose)
     
+    trained_qubits = DEFAULT_TRAINED_QUBITS
+
     # Display mode information
     if UNIVERSAL_MODE:
         logger.info(" Universal SymQNet mode enabled ")
 
     else:
         logger.info(" Fallback mode active")
-        logger.info("  Supports exactly 10-qubit systems only")
     
     #  FIXED: Handle model file paths gracefully
     try:
@@ -684,10 +693,13 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
             checkpoint_metadata["M_evo"],
             checkpoint_metadata["rollout_steps"],
         )
+        trained_qubits = int(checkpoint_metadata["n_qubits"])
         if shots_encoding_type is None:
             logger.info(" Shots encoding disabled; model metadata will not include shot count conditioning.")
         else:
             logger.info(" Shots encoding enabled; model expects shot count conditioning via metadata.")
+        if not UNIVERSAL_MODE:
+            logger.info(f"  Supports exactly {trained_qubits}-qubit systems only")
     except click.ClickException:
         raise  # Re-raise click exceptions as-is
     except Exception as e:
@@ -701,7 +713,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     
     # Validate with mode-appropriate constraints
     try:
-        hamiltonian_data = validate_hamiltonian_universal(hamiltonian_path)
+        hamiltonian_data = validate_hamiltonian_universal(hamiltonian_path, optimal_qubits=trained_qubits)
         n_qubits = hamiltonian_data['n_qubits']
         
     except ValueError as e:
@@ -725,16 +737,16 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         torch.cuda.manual_seed_all(seed)
     
     # Initialize performance estimator
-    performance_estimator = PerformanceEstimator(optimal_qubits=10)
+    performance_estimator = PerformanceEstimator(optimal_qubits=trained_qubits)
     
     # Performance analysis and warnings
     if not no_performance_warnings:
-        warning = get_performance_warning(n_qubits, optimal_qubits=10)
+        warning = get_performance_warning(n_qubits, optimal_qubits=trained_qubits)
         if warning:
             logger.warning(warning)
     
     if show_performance_analysis:
-        print_performance_info(n_qubits, performance_estimator)
+        print_performance_info(n_qubits, performance_estimator, optimal_qubits=trained_qubits)
     
     # Get recommended parameters based on system size
     requested_shots = shots
@@ -779,7 +791,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
             shots=shots,
             n_rollouts=n_rollouts,
             max_steps=max_steps,
-            warn_performance=(not no_performance_warnings)
+            warn_performance=(not no_performance_warnings),
+            trained_qubits=trained_qubits
         )
         
         # 3. Save Results
@@ -799,7 +812,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
                 'performance_metadata': {
                     'expected_performance': performance_report.performance_factor,
                     'performance_level': performance_report.level.value,
-                    'optimal_qubits': 10,
+                    'optimal_qubits': trained_qubits,
                     'universal_mode': UNIVERSAL_MODE,
                     'parameter_extraction_fixed': True
                 }
@@ -809,7 +822,7 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         
         # Print summary with performance context
         print_summary(final_results, n_qubits, performance_report.performance_factor,
-                      requested_shots, shots_used)
+                      requested_shots, shots_used, optimal_qubits=trained_qubits)
         
         # Final performance note
         success_msg = " Universal molecular optimization completed successfully!" if UNIVERSAL_MODE else " Molecular optimization completed successfully!"

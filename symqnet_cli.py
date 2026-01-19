@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 """
 SymQNet Molecular Optimization CLI - CORRECTED UNIVERSAL VERSION
+
 Usage:
     symqnet-molopt --hamiltonian molecule.json --shots 1024 --output results.json
+
+Output summary:
+    • symqnet_results: coupling/field estimates, uncertainty stats, rollouts
+    • hamiltonian_info / experimental_config / metadata
+    • optional performance_analysis, universal_wrapper, validation blocks
+
+Metadata slots:
+    Uses the MetadataLayout contract (see ARCHITECTURE_CONTRACT.md) to encode
+    qubit/basis/time selections, shot budget (optional), and posterior features.
+
+Shot handling:
+    The --shots value drives measurement sampling. If the checkpoint includes
+    shots_encoding metadata, the shot budget is normalized as
+    log1p(shots) / log1p(1_000_000) and injected into the metadata vector.
 """
 import click
 import json
@@ -669,6 +684,17 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
      support (any qubit count) with WORKING parameter extraction
      Fallback to 10-qubit-only mode if universal components unavailable
      Checkpoint metadata expectations: meta_dim and optional shots_encoding
+
+    Metadata slots:
+        See ARCHITECTURE_CONTRACT.md for the full metadata slot layout.
+
+    Shot handling:
+        If the checkpoint declares shots_encoding, the shot budget is injected into the
+        metadata vector using log1p(shots) / log1p(1_000_000). Otherwise the shots slot is 0.
+
+    Migration note:
+        Older checkpoints without model_state_dict/meta_dim/shots_encoding/n_qubits/M_evo/rollout_steps
+        must be re-exported with the current checkpoint_format/version fields.
 
     Examples:
         symqnet-molopt --hamiltonian H2O_10q.json --output results.json

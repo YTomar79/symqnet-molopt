@@ -466,14 +466,37 @@ class PolicyEngine:
     
     def get_parameter_estimate(self) -> np.ndarray:
         """Get current parameter estimate from policy."""
+        posterior_mean, _ = self.get_posterior_summary()
+        if posterior_mean is not None:
+            logger.debug(
+                " Returning parameter estimate from SMC posterior: shape=%s, "
+                "range=[%.6f, %.6f]",
+                posterior_mean.shape,
+                posterior_mean.min(),
+                posterior_mean.max(),
+            )
+            return posterior_mean
         if self.parameter_history:
             estimate = self.parameter_history[-1]
-            logger.debug(f" Returning parameter estimate: shape={estimate.shape}, "
-                        f"range=[{estimate.min():.6f}, {estimate.max():.6f}]")
+            logger.debug(
+                " Returning parameter estimate from history: shape=%s, "
+                "range=[%.6f, %.6f]",
+                estimate.shape,
+                estimate.min(),
+                estimate.max(),
+            )
             return estimate
-        else:
-            logger.warning(" No parameter history, returning zeros")
-            return np.zeros(2 * self.n_qubits - 1)
+        logger.warning(" No parameter history or SMC summary, returning zeros")
+        return np.zeros(2 * self.n_qubits - 1)
+
+    def get_posterior_summary(self) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Return the current SMC posterior mean and covariance."""
+        if not hasattr(self, "smc") or self.smc is None:
+            return None, None
+        mean, cov = self.smc.posterior_mean_and_covariance()
+        mean_np = mean.detach().cpu().numpy()
+        cov_np = cov.detach().cpu().numpy()
+        return mean_np, cov_np
     
     def has_converged(self, parameter_estimates: List[np.ndarray]) -> bool:
         """Check if parameter estimates have converged."""

@@ -299,10 +299,12 @@ class TestBootstrapEstimator:
         for i in range(n_rollouts):
             # 19 parameters for 10-qubit system (9 coupling + 10 field)
             fake_params = np.random.randn(19) * 0.1 + np.array([0.2] * 9 + [0.1] * 10)
+            fake_cov = np.diag(np.full(19, 0.02))
             
             estimates.append({
                 'rollout_id': i,
-                'final_estimate': fake_params,
+                'smc_posterior_mean': fake_params,
+                'smc_posterior_cov': fake_cov,
                 'convergence_step': np.random.randint(10, 50)
             })
         

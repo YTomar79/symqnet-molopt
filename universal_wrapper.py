@@ -13,7 +13,7 @@ import warnings
 logger = logging.getLogger(__name__)
 
 class UniversalSymQNetWrapper:
-    """Makes 10-qubit trained SymQNet work for any molecular system"""
+    """Makes trained SymQNet work for any molecular system"""
     
     def __init__(self, trained_model_path: Path, trained_vae_path: Path, device: torch.device):
         """
@@ -25,44 +25,43 @@ class UniversalSymQNetWrapper:
             device: PyTorch device (cpu/cuda)
         """
         self.device = device
-        self.trained_qubits = 10 
+        self.trained_qubits = None
         self.vae_latent = 64     
-        self.metadata_dim = 84   # action + shots + belief features
+        self.metadata_dim = None  # action + shots + belief features
         self.M_evo = 5          
         
         # Store paths
         self.model_path = trained_model_path
         self.vae_path = trained_vae_path
         
-        # Load trained 10-qubit model
+        # Load trained model
         self.policy_engine = self._load_trained_model(trained_model_path, trained_vae_path)
+
+        self.trained_qubits = getattr(self.policy_engine, "n_qubits", None)
+        self.metadata_dim = getattr(self.policy_engine, "meta_dim", None)
 
         self._validate_policy_engine()
         
-        logger.info("Universal SymQNet loaded - supports any qubit count")
-        logger.info(f"Optimal performance at {self.trained_qubits} qubits")
+        logger.info(
+            "Universal SymQNet loaded - supports any qubit count; "
+            f"optimal performance at {self.trained_qubits} qubits"
+        )
 
     def _validate_policy_engine(self) -> None:
         """Validate policy engine metadata and qubit expectations."""
         engine_qubits = getattr(self.policy_engine, "n_qubits", None)
         if engine_qubits is None:
             raise ValueError("Policy engine missing n_qubits metadata.")
-        if engine_qubits != self.trained_qubits:
-            raise ValueError(
-                "Policy engine qubit count mismatch: "
-                f"expected {self.trained_qubits}, got {engine_qubits}."
-            )
+        if not isinstance(engine_qubits, int) or engine_qubits <= 0:
+            raise ValueError(f"Invalid policy engine n_qubits value: {engine_qubits}.")
         engine_meta_dim = getattr(self.policy_engine, "meta_dim", None)
         if engine_meta_dim is None:
             raise ValueError("Policy engine missing meta_dim metadata.")
-        if engine_meta_dim != self.metadata_dim:
-            raise ValueError(
-                "Policy engine metadata size mismatch: "
-                f"expected {self.metadata_dim}, got {engine_meta_dim}."
-            )
+        if not isinstance(engine_meta_dim, int) or engine_meta_dim <= 0:
+            raise ValueError(f"Invalid policy engine meta_dim value: {engine_meta_dim}.")
     
     def _load_trained_model(self, model_path: Path, vae_path: Path):
-        """Load the original trained 10-qubit model"""
+        """Load the original trained model"""
         from policy_engine import PolicyEngine
         return PolicyEngine(model_path, vae_path, self.device)
     
@@ -112,7 +111,7 @@ class UniversalSymQNetWrapper:
                     UserWarning
                 )
         
-        # Normalize to 10-qubit representation
+        # Normalize to trained representation
         logger.debug(f"Normalizing {original_qubits}-qubit system to {self.trained_qubits} qubits")
         normalized_hamiltonian = self._normalize_hamiltonian(hamiltonian_data)
         
@@ -139,7 +138,7 @@ class UniversalSymQNetWrapper:
         return final_results
     
     def _normalize_hamiltonian(self, hamiltonian_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize any qubit system to 10-qubit representation"""
+        """Normalize any qubit system to trained representation"""
         
         original_qubits = hamiltonian_data['n_qubits']
         pauli_terms = hamiltonian_data['pauli_terms']
@@ -245,7 +244,7 @@ class UniversalSymQNetWrapper:
     
     def _run_optimization(self, normalized_hamiltonian: Dict[str, Any], 
                          shots: int, n_rollouts: int, max_steps: int) -> Dict[str, Any]:
-        """Run optimization on normalized 10-qubit system using existing infrastructure"""
+        """Run optimization on normalized system using existing infrastructure"""
         
         from measurement_simulator import MeasurementSimulator
         from bootstrap_estimator import BootstrapEstimator
@@ -265,7 +264,7 @@ class UniversalSymQNetWrapper:
                 f"wrapper expects {self.metadata_dim}, policy engine has {self.policy_engine.meta_dim}."
             )
         
-        # Initialize components for 10-qubit normalized system
+        # Initialize components for normalized system
         simulator = MeasurementSimulator(
             hamiltonian_data=normalized_hamiltonian,
             shots=shots,
@@ -347,9 +346,9 @@ class UniversalSymQNetWrapper:
         
         symqnet_results = normalized_results['symqnet_results']
         
-        # Extract normalized parameters (19 total: 9+10 from 10-qubit system)
-        norm_coupling = symqnet_results['coupling_parameters']  # 9 from 10-qubit
-        norm_field = symqnet_results['field_parameters']        # 10 from 10-qubit
+        # Extract normalized parameters (coupling: trained_qubits - 1, field: trained_qubits)
+        norm_coupling = symqnet_results['coupling_parameters']
+        norm_field = symqnet_results['field_parameters']
         
         # Target parameter counts
         target_coupling_count = target_qubits - 1
@@ -481,7 +480,7 @@ class UniversalSymQNetWrapper:
         return extrapolated
     
     def _calculate_performance_factor(self, n_qubits: int) -> float:
-        """Calculate expected performance relative to 10-qubit optimum"""
+        """Calculate expected performance relative to the trained optimum"""
         
         if n_qubits == self.trained_qubits:
             return 1.0

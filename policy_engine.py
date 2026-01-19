@@ -54,6 +54,7 @@ class PolicyEngine:
 
         vae_state = torch.load(self.vae_path, map_location=self.device, weights_only=False)
         vae_M, vae_L = self._infer_vae_dims(vae_state)
+        self.vae_L = vae_L
         self.vae = VariationalAutoencoder(M=vae_M, L=vae_L).to(self.device)
         self.vae.load_state_dict(vae_state)
         self.vae.eval()
@@ -76,7 +77,12 @@ class PolicyEngine:
         self.meta_dim = self._coerce_positive_int(checkpoint_data["meta_dim"], "meta_dim")
         self.shots_encoding = checkpoint_data["shots_encoding"]
         self.include_shots = bool(self.shots_encoding)
-        logger.info("🔍 Metadata: meta_dim=%s, include_shots=%s", self.meta_dim, self.include_shots)
+        logger.info(
+            "🔍 Metadata: meta_dim=%s, include_shots=%s, vae_L=%s",
+            self.meta_dim,
+            self.include_shots,
+            self.vae_L,
+        )
 
         self.metadata_layout = MetadataLayout.from_problem(self.n_qubits, self.M_evo)
         if self.meta_dim != self.metadata_layout.meta_dim:
@@ -284,7 +290,7 @@ class PolicyEngine:
         self.symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=n_qubits,
-            L=64,  # BASE VAE dimension, internal arch adds metadata
+            L=self.vae_L,  # BASE VAE dimension, internal arch adds metadata
             edge_index=edge_index,
             edge_attr=edge_attr,
             T=T,

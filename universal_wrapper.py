@@ -96,6 +96,7 @@ class UniversalSymQNetWrapper:
         original_qubits = hamiltonian_data['n_qubits']
 
         self._validate_qubit_scaling(original_qubits)
+        self._validate_normalized_qubits(hamiltonian_data)
         
         logger.info(f" estimation: {original_qubits} qubits → {self.trained_qubits} qubits → {original_qubits} qubits")
         
@@ -256,7 +257,7 @@ class UniversalSymQNetWrapper:
         if getattr(self.policy_engine, "n_qubits", None) != normalized_hamiltonian.get("n_qubits"):
             raise ValueError(
                 "Normalized Hamiltonian qubit count does not match policy engine: "
-                f"{normalized_hamiltonian.get('n_qubits')} vs {self.policy_engine.n_qubits}."
+                f"expected {self.policy_engine.n_qubits}, got {normalized_hamiltonian.get('n_qubits')}."
             )
         if getattr(self.policy_engine, "meta_dim", None) != self.metadata_dim:
             raise ValueError(
@@ -264,6 +265,13 @@ class UniversalSymQNetWrapper:
                 f"wrapper expects {self.metadata_dim}, policy engine has {self.policy_engine.meta_dim}."
             )
         
+        capability_limits = normalized_hamiltonian.get("capability_limits", {})
+        MeasurementSimulator.validate_capability(
+            normalized_hamiltonian.get("n_qubits"),
+            capability_limits.get("max_matrix_mb"),
+            capability_limits.get("max_hilbert_dim"),
+        )
+
         # Initialize components for normalized system
         simulator = MeasurementSimulator(
             hamiltonian_data=normalized_hamiltonian,
@@ -505,3 +513,21 @@ class UniversalSymQNetWrapper:
             raise ValueError(f"Invalid n_qubits value: {n_qubits}")
         if self.trained_qubits <= 0:
             raise ValueError(f"Invalid trained_qubits value: {self.trained_qubits}")
+
+    def _validate_normalized_qubits(self, hamiltonian_data: Dict[str, Any]) -> None:
+        """Validate normalized qubit count against policy engine and simulator limits."""
+        from measurement_simulator import MeasurementSimulator
+
+        expected_qubits = getattr(self.policy_engine, "n_qubits", None)
+        if expected_qubits != self.trained_qubits:
+            raise ValueError(
+                "Policy engine qubit count mismatch: "
+                f"expected {expected_qubits}, got {self.trained_qubits}."
+            )
+
+        capability_limits = hamiltonian_data.get("capability_limits", {})
+        MeasurementSimulator.validate_capability(
+            expected_qubits,
+            capability_limits.get("max_matrix_mb"),
+            capability_limits.get("max_hilbert_dim"),
+        )

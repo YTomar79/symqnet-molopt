@@ -347,18 +347,16 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
             trained_vae_path=vae_path,
             device=device
         )
+
+        universal_wrapper._validate_normalized_qubits(hamiltonian_data)
         
         # Get normalized hamiltonian
         normalized_hamiltonian = universal_wrapper._normalize_hamiltonian(hamiltonian_data)
         if normalized_hamiltonian.get("n_qubits") != universal_wrapper.trained_qubits:
-            logger.warning(
-                "Normalized Hamiltonian qubit count mismatch; "
-                "forcing to trained qubit count for rollouts."
+            raise ValueError(
+                "Normalized Hamiltonian qubit count mismatch: "
+                f"expected {universal_wrapper.trained_qubits}, got {normalized_hamiltonian.get('n_qubits')}."
             )
-            normalized_hamiltonian = {
-                **normalized_hamiltonian,
-                "n_qubits": universal_wrapper.trained_qubits
-            }
         logger.info(
             f"🔄 Normalized {original_qubits}-qubit → "
             f"{universal_wrapper.trained_qubits}-qubit system"

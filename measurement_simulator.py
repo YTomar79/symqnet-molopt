@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 class MeasurementSimulator:
     """Simulates quantum measurements for molecular Hamiltonians."""
+
+    DEFAULT_MAX_MATRIX_MB = 512
+    DEFAULT_MAX_HILBERT_DIM = 2 ** 14
+    WARN_HILBERT_DIM = 2 ** 12
     
     def __init__(self, hamiltonian_data: Dict[str, Any], shots: int, 
                  device: torch.device, noise_prob: float = 0.02):
@@ -18,16 +22,20 @@ class MeasurementSimulator:
         self.shots = shots
         self.device = device
         self.noise_prob = noise_prob
-        self.n_qubits = hamiltonian_data['n_qubits']
-        
-        if self.n_qubits != 10:
-            raise ValueError(
-                f"MeasurementSimulator only supports 10-qubit systems. "
-                f"Got {self.n_qubits} qubits."
-            )
-        
+        self.n_qubits = hamiltonian_data["n_qubits"]
+
+        capability_limits = hamiltonian_data.get("capability_limits", {})
+        max_matrix_mb = capability_limits.get("max_matrix_mb", self.DEFAULT_MAX_MATRIX_MB)
+        max_hilbert_dim = capability_limits.get("max_hilbert_dim", self.DEFAULT_MAX_HILBERT_DIM)
+        self.validate_capability(self.n_qubits, max_matrix_mb, max_hilbert_dim)
+
         dim = 2 ** self.n_qubits
-        memory_mb = (dim * dim * 16) / (1024 * 1024)  # Complex128 = 16 bytes
+        memory_mb = self._estimate_matrix_mb(dim)
+        if dim > self.WARN_HILBERT_DIM:
+            logger.warning(
+                "Large Hilbert space (%s). Measurements may be slow or memory-intensive.",
+                dim
+            )
         if memory_mb > 100:  # Warn for >100MB
             logger.warning(f"Large Hamiltonian matrix: {memory_mb:.1f} MB")
         
@@ -41,12 +49,60 @@ class MeasurementSimulator:
         )
         
         # fix was to match policy_engine.py time range
-        self.evolution_times = np.linspace(0.1, 1.0, 10)  # Was 0.1 to 2.0
+        n_time_points = max(2, min(10, self.n_qubits))
+        self.evolution_times = np.linspace(0.1, 1.0, n_time_points)  # Was 0.1 to 2.0
         
         # Precompute evolution operators
         self._precompute_evolution_operators()
         
         logger.info(f"Initialized simulator for {self.n_qubits}-qubit system")
+
+    @classmethod
+    def _estimate_matrix_mb(cls, dim: int) -> float:
+        """Estimate Hamiltonian matrix memory (Complex128)."""
+        return (dim * dim * 16) / (1024 * 1024)
+
+    @classmethod
+    def check_capability(
+        cls,
+        n_qubits: int,
+        max_matrix_mb: Optional[float] = None,
+        max_hilbert_dim: Optional[int] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Check whether simulator can handle the requested qubit count."""
+        if not isinstance(n_qubits, int) or n_qubits <= 0:
+            return False, f"Invalid qubit count: {n_qubits}"
+
+        max_matrix_mb = cls.DEFAULT_MAX_MATRIX_MB if max_matrix_mb is None else max_matrix_mb
+        max_hilbert_dim = cls.DEFAULT_MAX_HILBERT_DIM if max_hilbert_dim is None else max_hilbert_dim
+
+        dim = 2 ** n_qubits
+        if dim > max_hilbert_dim:
+            return (
+                False,
+                f"Hilbert space dimension {dim} exceeds limit {max_hilbert_dim}."
+            )
+        memory_mb = cls._estimate_matrix_mb(dim)
+        if memory_mb > max_matrix_mb:
+            return (
+                False,
+                f"Hamiltonian matrix requires {memory_mb:.1f} MB, exceeds limit {max_matrix_mb:.1f} MB."
+            )
+        return True, None
+
+    @classmethod
+    def validate_capability(
+        cls,
+        n_qubits: int,
+        max_matrix_mb: Optional[float] = None,
+        max_hilbert_dim: Optional[int] = None,
+    ) -> None:
+        """Raise if simulator cannot handle the requested qubit count."""
+        supported, reason = cls.check_capability(n_qubits, max_matrix_mb, max_hilbert_dim)
+        if not supported:
+            raise ValueError(
+                f"MeasurementSimulator cannot support {n_qubits} qubits. {reason}"
+            )
     
     def _get_pauli_matrices(self) -> Dict[str, np.ndarray]:
         """Get Pauli matrices."""

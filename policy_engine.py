@@ -77,6 +77,25 @@ class PolicyEngine:
         self.meta_dim = self._coerce_positive_int(checkpoint_data["meta_dim"], "meta_dim")
         self.shots_encoding = checkpoint_data["shots_encoding"]
         self.include_shots = bool(self.shots_encoding)
+        pos_emb = state_dict.get("temp_agg.pos_emb")
+        if pos_emb is not None:
+            if pos_emb.ndim < 2:
+                logger.warning(
+                    "⚠️ temp_agg.pos_emb has unexpected shape %s; "
+                    "expected [*, T, *], keeping rollout_steps=%s.",
+                    tuple(pos_emb.shape),
+                    self.T,
+                )
+            else:
+                pos_emb_T = int(pos_emb.shape[1])
+                if pos_emb_T != self.T:
+                    logger.warning(
+                        "⚠️ rollout_steps=%s does not match temp_agg.pos_emb length=%s; "
+                        "using pos_emb length for T.",
+                        self.T,
+                        pos_emb_T,
+                    )
+                    self.T = pos_emb_T
         logger.info(
             "🔍 Metadata: meta_dim=%s, include_shots=%s, vae_L=%s",
             self.meta_dim,

@@ -84,11 +84,13 @@ try:
         GraphEmbed,
         TemporalContextualAggregator,
         PolicyValueHead,
-        SpinChainEnv
+        SpinChainEnv,
+        MetadataLayout,
     )
 except ImportError as e:
     logger.warning(f" Architecture imports failed: {e}")
     # continue anyway so that we can let it fail later with clearer error
+    MetadataLayout = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -102,13 +104,13 @@ def ensure_model_files(model_path: Optional[Path],
                        vae_path: Optional[Path],
                        auto_symlink: bool = True) -> Tuple[Path, Path]:
     """
-    Resolve FINAL_FIXED_SYMQNET.pth and vae_M10_f.pth with auto-download fallback.
+    Resolve BEST_SYMQNET_MODEL_PPOV2.pth and vae_M10_f.pth with auto-download fallback.
     """
-    MODEL_FILE = "FINAL_FIXED_SYMQNET.pth"
+    MODEL_FILE = "BEST_SYMQNET_MODEL_PPOV2.pth"
     VAE_FILE = "vae_M10_f.pth"
     
     # GitHub URLs for auto-download
-    MODEL_URL = "https://github.com/YTomar79/symqnet-molopt/raw/main/models/FINAL_FIXED_SYMQNET.pth"
+    MODEL_URL = "https://github.com/YTomar79/symqnet-molopt/raw/main/models/BEST_SYMQNET_MODEL_PPOV2.pth"
     VAE_URL = "https://github.com/YTomar79/symqnet-molopt/raw/main/models/vae_M10_f.pth"
 
     def _download_file(url: str, filepath: Path) -> Path:
@@ -166,6 +168,63 @@ def ensure_model_files(model_path: Optional[Path],
         return final_model, final_vae
     except Exception as e:
         raise click.ClickException(f" Model resolution failed: {e}")
+
+
+def validate_checkpoint_metadata(model_path: Path) -> Dict[str, any]:
+    """Validate checkpoint metadata schema and return normalized metadata."""
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    if not isinstance(checkpoint, dict):
+        raise click.ClickException("Model checkpoint must be a dictionary-based state bundle.")
+    if MetadataLayout is None:
+        raise click.ClickException(
+            "Architecture metadata tools unavailable; cannot validate checkpoint metadata."
+        )
+
+    required_keys = {
+        "model_state_dict",
+        "meta_dim",
+        "shots_encoding",
+        "n_qubits",
+        "M_evo",
+        "rollout_steps",
+    }
+    missing = sorted(required_keys - checkpoint.keys())
+    if missing:
+        raise click.ClickException(f"Checkpoint missing required metadata keys: {missing}")
+
+    shots_encoding = checkpoint["shots_encoding"]
+    if shots_encoding is not None and not isinstance(shots_encoding, dict):
+        raise click.ClickException("Checkpoint shots_encoding must be a dict or None.")
+    if isinstance(shots_encoding, dict) and "type" not in shots_encoding:
+        raise click.ClickException("Checkpoint shots_encoding dict must include a 'type' field.")
+
+    metadata_layout = MetadataLayout.from_problem(
+        n_qubits=int(checkpoint["n_qubits"]),
+        M_evo=int(checkpoint["M_evo"]),
+    )
+    meta_dim = int(checkpoint["meta_dim"])
+    if meta_dim != metadata_layout.meta_dim:
+        raise click.ClickException(
+            "Checkpoint meta_dim mismatch: "
+            f"{meta_dim} (checkpoint) vs {metadata_layout.meta_dim} (expected)."
+        )
+
+    checkpoint_format = checkpoint.get("checkpoint_format")
+    checkpoint_version = checkpoint.get("checkpoint_version")
+    if (checkpoint_format is None) != (checkpoint_version is None):
+        raise click.ClickException(
+            "Checkpoint must include both checkpoint_format and checkpoint_version, or neither."
+        )
+
+    return {
+        "meta_dim": meta_dim,
+        "shots_encoding": shots_encoding,
+        "n_qubits": int(checkpoint["n_qubits"]),
+        "M_evo": int(checkpoint["M_evo"]),
+        "rollout_steps": int(checkpoint["rollout_steps"]),
+        "checkpoint_format": checkpoint_format,
+        "checkpoint_version": checkpoint_version,
+    }
 
 
 def find_hamiltonian_file(hamiltonian_path: Path) -> Path:
@@ -553,7 +612,8 @@ def get_recommended_params_for_system(n_qubits: int,
 @click.option('--model-path', '-m',
               type=click.Path(path_type=Path),
               default=None,
-              help='Path to trained SymQNet model (default: models/FINAL_FIXED_SYMQNET.pth)')
+              help='Path to trained SymQNet model (default: models/BEST_SYMQNET_MODEL_PPOV2.pth). '
+                   'Checkpoint must include meta_dim and shots_encoding metadata.')
 @click.option('--vae-path', '-v',
               type=click.Path(path_type=Path),
               default=None,
@@ -596,7 +656,8 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
     
      support (any qubit count) with WORKING parameter extraction
      Fallback to 10-qubit-only mode if universal components unavailable
-    
+     Checkpoint metadata expectations: meta_dim and optional shots_encoding
+
     Examples:
         symqnet-molopt --hamiltonian H2O_10q.json --output results.json
         symqnet-molopt --hamiltonian molecule.json --output results.json --shots 2048
@@ -621,6 +682,21 @@ def main(hamiltonian: Path, shots: int, output: Path, model_path: Optional[Path]
         model_path, vae_path = ensure_model_files(model_path, vae_path)
         logger.info(f" Using model: {model_path}")
         logger.info(f" Using VAE: {vae_path}")
+        checkpoint_metadata = validate_checkpoint_metadata(model_path)
+        shots_encoding = checkpoint_metadata["shots_encoding"]
+        shots_encoding_type = shots_encoding.get("type") if isinstance(shots_encoding, dict) else None
+        logger.info(
+            " Checkpoint metadata: meta_dim=%s, shots_encoding=%s, n_qubits=%s, M_evo=%s, rollout_steps=%s",
+            checkpoint_metadata["meta_dim"],
+            shots_encoding_type or "none",
+            checkpoint_metadata["n_qubits"],
+            checkpoint_metadata["M_evo"],
+            checkpoint_metadata["rollout_steps"],
+        )
+        if shots_encoding_type is None:
+            logger.info(" Shots encoding disabled; model metadata will not include shot count conditioning.")
+        else:
+            logger.info(" Shots encoding enabled; model expects shot count conditioning via metadata.")
     except click.ClickException:
         raise  # Re-raise click exceptions as-is
     except Exception as e:

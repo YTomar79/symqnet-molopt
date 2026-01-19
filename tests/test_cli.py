@@ -4,7 +4,7 @@ Unit tests for SymQNet CLI functionality
 
 Tests the complete CLI pipeline while respecting model constraints:
 - Model only handles EXACTLY 10 qubits
-- L parameter is 64 for SymQNet constructor (internally becomes 82)
+- L parameter is 64 for SymQNet constructor (internally becomes 148)
 """
 
 import pytest
@@ -257,10 +257,10 @@ class TestPolicyEngine:
                 device=self.device
             )
             
-            # 🔧 FIX: Verify L=64 constraint (not L=82!)
+            # 🔧 FIX: Verify L=64 constraint (not L=148!)
             mock_symqnet.assert_called_once()
             call_args = mock_symqnet.call_args
-            assert call_args[1]['L'] == 64  # L=64 passed to constructor, internally becomes 82
+            assert call_args[1]['L'] == 64  # L=64 passed to constructor, internally becomes 148
             
         except Exception as e:
             # Expected to fail with mock models, but should respect L=64
@@ -453,8 +453,8 @@ class TestModelConstraints:
     """Test that model constraints are properly enforced"""
     
     def test_l_parameter_constraint(self):
-        """Test that L=64 constraint is enforced (not L=82)"""
-        # 🔧 FIX: SymQNet constructor receives L=64, not L=82
+        """Test that L=64 constraint is enforced (not L=148)"""
+        # 🔧 FIX: SymQNet constructor receives L=64, not L=148
         
         # Mock test to verify L=64 is used
         with patch('architectures.FixedSymQNetWithEstimator') as mock_symqnet:
@@ -474,7 +474,7 @@ class TestModelConstraints:
                         pass
                     
                     # Verify that when FixedSymQNetWithEstimator is called,
-                    # it uses L=64 (base dimension, internally becomes 64+18=82)
+                    # it uses L=64 (base dimension, internally becomes 64+84=148)
                     if mock_symqnet.called:
                         call_args = mock_symqnet.call_args
                         # L should be 64 for constructor

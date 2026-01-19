@@ -163,7 +163,7 @@ def symqnet_config():
         'T': 10,
         'M_evo': 5,
         'A': 150,  # 10 * 3 * 5
-        'meta_dim': 18,  # 10 + 3 + 5
+        'meta_dim': 84,  # action + shots + belief features
         'total_params': 19  # 9 coupling + 10 field
     }
 

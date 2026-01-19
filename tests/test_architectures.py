@@ -3,7 +3,7 @@
 Unit tests for SymQNet architectures
 
 Tests all neural network components with correct constraints:
-- L=82 total dimension (64 latent + 18 metadata) for internal components
+- L=148 total dimension (64 latent + 84 metadata) for internal components
 - L=64 base latent dimension for VAE and SymQNet initialization  
 - 10-qubit maximum system size
 - Proper tensor shapes throughout
@@ -26,6 +26,7 @@ from architectures import (
     PolicyValueHead,
     FixedSymQNetWithEstimator,
     SpinChainEnv,
+    MetadataLayout,
     get_pauli_matrices,
     kron_n,
     generate_measurement_pair,
@@ -97,14 +98,14 @@ class TestVariationalAutoencoder:
 
 
 class TestGraphEmbed:
-    """Test Graph Embedding layer with L=82 constraint (CORRECT!)"""
+    """Test Graph Embedding layer with L=148 constraint (CORRECT!)"""
     
     def setup_method(self):
         """Setup test fixtures"""
         self.n_qubits = 10  # Maximum supported
         self.L_base = 64   # Base latent dimension
-        self.meta_dim = 18 # Metadata dimension (n_qubits + 3 + M_evo)
-        self.L_total = self.L_base + self.meta_dim  # 82 total - CORRECT!
+        self.meta_dim = 84  # Metadata dimension (action + shots + belief features)
+        self.L_total = self.L_base + self.meta_dim  # 148 total
         
         # Create chain graph connectivity
         edges = [(i, i+1) for i in range(self.n_qubits-1)] + [(i+1, i) for i in range(self.n_qubits-1)]
@@ -112,10 +113,10 @@ class TestGraphEmbed:
         self.edge_attr = torch.ones(len(edges), 1, dtype=torch.float32) * 0.1
     
     def test_graph_embed_creation(self):
-        """Test GraphEmbed creation with correct L=82"""
+        """Test GraphEmbed creation with correct L=148"""
         graph_embed = GraphEmbed(
             n_qubits=self.n_qubits,
-            L=self.L_total,  # L=82 is CORRECT for internal usage!
+            L=self.L_total,  # L=148 is CORRECT for internal usage!
             edge_index=self.edge_index,
             edge_attr=self.edge_attr,
             K=2
@@ -126,7 +127,7 @@ class TestGraphEmbed:
         assert graph_embed.K == 2
     
     def test_graph_embed_forward(self):
-        """Test GraphEmbed forward pass with L=82"""
+        """Test GraphEmbed forward pass with L=148"""
         graph_embed = GraphEmbed(
             n_qubits=self.n_qubits,
             L=self.L_total,
@@ -135,7 +136,7 @@ class TestGraphEmbed:
             K=2
         )
         
-        # Input must be L=82 dimensional
+        # Input must be L=148 dimensional
         z_input = torch.randn(self.L_total)
         z_output = graph_embed(z_input)
         
@@ -175,11 +176,11 @@ class TestGraphEmbed:
 
 
 class TestTemporalContextualAggregator:
-    """Test Temporal aggregation with L=82 (CORRECT!)"""
+    """Test Temporal aggregation with L=148 (CORRECT!)"""
     
     def setup_method(self):
         """Setup test fixtures"""
-        self.L = 82  # L=82 is CORRECT for internal usage!
+        self.L = 148  # L=148 is CORRECT for internal usage!
         self.T = 10  # Temporal window
     
     def test_temporal_aggregator_creation(self):
@@ -221,11 +222,11 @@ class TestTemporalContextualAggregator:
 
 
 class TestPolicyValueHead:
-    """Test Policy-Value head with L=82 (CORRECT!)"""
+    """Test Policy-Value head with L=148 (CORRECT!)"""
     
     def setup_method(self):
         """Setup test fixtures"""
-        self.L = 82  # L=82 is CORRECT!
+        self.L = 148  # L=148 is CORRECT!
         self.A = 150  # Action space (10 qubits * 3 bases * 5 times)
     
     def test_policy_head_creation(self):
@@ -302,7 +303,7 @@ class TestFixedSymQNetWithEstimator:
         symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=self.n_qubits,
-            L=self.L,  # L=64 for constructor, internally becomes L+meta=82
+            L=self.L,  # L=64 for constructor, internally becomes L+meta=148
             edge_index=self.edge_index,
             edge_attr=self.edge_attr,
             T=self.T,
@@ -331,15 +332,15 @@ class TestFixedSymQNetWithEstimator:
         
         # Create inputs
         obs = torch.randn(10)  # Measurement observation
-        metadata = torch.zeros(18)  # n_qubits + 3 + M_evo = 10 + 3 + 5
+        layout = MetadataLayout.from_problem(self.n_qubits, self.M_evo)
+        metadata = torch.zeros(layout.meta_dim)
         
         # Forward pass
-        dist, value, theta_hat = symqnet(obs, metadata)
+        dist, value = symqnet(obs, metadata)
         
         # Check outputs
         assert hasattr(dist, 'sample')
         assert value.shape == torch.Size([])
-        assert theta_hat.shape == torch.Size([19])  # 2*n_qubits - 1 = 19
     
     def test_symqnet_buffer_management(self):
         """Test SymQNet ring buffer functionality"""
@@ -362,9 +363,10 @@ class TestFixedSymQNetWithEstimator:
         # Run multiple steps
         for step in range(15):  # More than T=10
             obs = torch.randn(10)
-            metadata = torch.zeros(18)
+            layout = MetadataLayout.from_problem(self.n_qubits, self.M_evo)
+            metadata = torch.zeros(layout.meta_dim)
             
-            dist, value, theta_hat = symqnet(obs, metadata)
+            dist, value = symqnet(obs, metadata)
             
             # Buffer should not exceed T
             assert len(symqnet.zG_history) <= self.T
@@ -373,7 +375,7 @@ class TestFixedSymQNetWithEstimator:
         assert len(symqnet.zG_history) == self.T
     
     def test_parameter_estimation_shape(self):
-        """Test parameter estimation outputs correct shape"""
+        """Test policy/value outputs correct shape"""
         symqnet = FixedSymQNetWithEstimator(
             vae=self.vae,
             n_qubits=self.n_qubits,
@@ -387,13 +389,13 @@ class TestFixedSymQNetWithEstimator:
         )
         
         obs = torch.randn(10)
-        metadata = torch.zeros(18)
+        layout = MetadataLayout.from_problem(self.n_qubits, self.M_evo)
+        metadata = torch.zeros(layout.meta_dim)
         
-        _, _, theta_hat = symqnet(obs, metadata)
-        
-        # Should estimate 19 parameters for 10-qubit system
-        # 9 coupling parameters (J) + 10 field parameters (h)
-        assert theta_hat.shape == torch.Size([19])
+        dist, value = symqnet(obs, metadata)
+
+        assert hasattr(dist, 'sample')
+        assert value.shape == torch.Size([])
 
 
 class TestSpinChainEnv:

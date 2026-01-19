@@ -1485,16 +1485,16 @@ class FixedSymQNetWithEstimator(nn.Module):
         # Belief-state feedback dims
         self.theta_dim = 2 * n_qubits - 1
 
-        # Slots (keep shots in the last slot so existing code patterns remain simple)
-        self.theta_slot0 = base                          # posterior mean
-        self.cov_slot0   = self.theta_slot0 + self.theta_dim
+        # Slots (action one-hots, shots, posterior mean/cov/fisher)
+        self.shots_slot = base
+        self.theta_slot0 = self.shots_slot + 1
+        self.cov_slot0 = self.theta_slot0 + self.theta_dim
 
-        self.cov_feat_dim    = self.theta_dim + 8        # diag + top-8 eigs
-        self.fisher_slot0    = self.cov_slot0 + self.cov_feat_dim
-        self.fisher_feat_dim = self.theta_dim            # <-- fisher feature length
+        self.cov_feat_dim = self.theta_dim + 8        # diag + top-8 eigs
+        self.fisher_slot0 = self.cov_slot0 + self.cov_feat_dim
+        self.fisher_feat_dim = self.theta_dim         # fisher feature length
 
-        self.shots_slot = self.fisher_slot0 + self.fisher_feat_dim  # <-- move shots AFTER fisher
-        self.meta_dim   = self.shots_slot + 1
+        self.meta_dim = self.fisher_slot0 + self.fisher_feat_dim
 
 
 

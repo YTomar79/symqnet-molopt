@@ -251,29 +251,28 @@ def test_complete_symqnet():
         
         # Test forward pass
         obs = torch.randn(10)
-        metadata = torch.zeros(18)  # n_qubits + 3 + M_evo
+        metadata = torch.zeros(84)  # action + shots + belief features
         
-        dist, value, theta_hat = symqnet(obs, metadata)
+        dist, value = symqnet(obs, metadata)
         
         # Check outputs
         dist_ok = hasattr(dist, 'sample')
         value_ok = value.shape == torch.Size([])
-        theta_ok = theta_hat.shape == torch.Size([19])  # 2*n_qubits - 1
         
-        print_test_result("SymQNet forward pass", dist_ok and value_ok and theta_ok,
-                         f"Value: {value.shape}, Theta: {theta_hat.shape}")
+        print_test_result("SymQNet forward pass", dist_ok and value_ok,
+                         f"Value: {value.shape}")
         
         # Test multiple steps (ring buffer)
         symqnet.reset_buffer()
         for step in range(5):
             obs_step = torch.randn(10) 
-            metadata_step = torch.zeros(18)
-            dist_step, value_step, theta_step = symqnet(obs_step, metadata_step)
+            metadata_step = torch.zeros(84)
+            dist_step, value_step = symqnet(obs_step, metadata_step)
         
         buffer_ok = len(symqnet.zG_history) == 5
         print_test_result("Ring buffer functionality", buffer_ok, f"Buffer length: {len(symqnet.zG_history)}")
         
-        return dist_ok and value_ok and theta_ok and buffer_ok
+        return dist_ok and value_ok and buffer_ok
         
     except Exception as e:
         print_test_result("Complete SymQNet tests", False, f"Error: {e}")
@@ -359,18 +358,17 @@ def test_model_loading():
         
         # Test full forward pass
         obs = torch.randn(10)
-        metadata = torch.zeros(18)
+        metadata = torch.zeros(84)
         
         with torch.no_grad():
-            dist, value, theta_hat = symqnet(obs, metadata)
+            dist, value = symqnet(obs, metadata)
         
         symqnet_ok = (
             hasattr(dist, 'sample') and
-            value.shape == torch.Size([]) and  
-            theta_hat.shape == torch.Size([19])
+            value.shape == torch.Size([])
         )
         print_test_result("SymQNet full test", symqnet_ok, 
-                         f"Output shapes: value{value.shape}, theta{theta_hat.shape}")
+                         f"Output shapes: value{value.shape}")
         
     except Exception as e:
         print_test_result("SymQNet model loading", False, f"Error: {e}")

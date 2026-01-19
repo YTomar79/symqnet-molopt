@@ -483,13 +483,13 @@ class MetadataLayout:
     def from_problem(cls, n_qubits: int, M_evo: int) -> "MetadataLayout":
         base = n_qubits + 3 + M_evo
         theta_dim = 2 * n_qubits - 1
-        theta_slot0 = base
+        shots_slot = base
+        theta_slot0 = shots_slot + 1
         cov_slot0 = theta_slot0 + theta_dim
         cov_feat_dim = theta_dim + 8
         fisher_slot0 = cov_slot0 + cov_feat_dim
         fisher_feat_dim = theta_dim
-        shots_slot = fisher_slot0 + fisher_feat_dim
-        meta_dim = shots_slot + 1
+        meta_dim = fisher_slot0 + fisher_feat_dim
         return cls(
             n_qubits=n_qubits,
             M_evo=M_evo,
@@ -559,6 +559,22 @@ class FixedSymQNetWithEstimator(nn.Module):
 
     def forward(self, obs, metadata, deterministic_inference: bool = False):
         """Forward pass that properly uses metadata throughout"""
+        if metadata.dim() == 1:
+            expected_dim = self.meta_dim
+            if metadata.shape[0] != expected_dim:
+                raise ValueError(
+                    f"Metadata dimension mismatch: expected {expected_dim}, got {metadata.shape[0]}"
+                )
+        elif metadata.dim() == 2:
+            expected_dim = self.meta_dim
+            if metadata.shape[1] != expected_dim:
+                raise ValueError(
+                    f"Metadata dimension mismatch: expected {expected_dim}, got {metadata.shape[1]}"
+                )
+        else:
+            raise ValueError(
+                f"Metadata must be 1D or 2D, got shape {tuple(metadata.shape)}"
+            )
         # Store current metadata
         self.current_metadata = metadata
 

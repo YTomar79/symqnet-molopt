@@ -12,12 +12,12 @@ import logging
 
 
 from architectures import (
-    VariationalAutoencoder, 
-    GraphEmbed,
-    TemporalContextualAggregator, 
-    PolicyValueHead,
-    FixedSymQNetWithEstimator
+    VariationalAutoencoder,
+    FixedSymQNetWithEstimator,
+    MetadataLayout,
+    SpinChainEnv,
 )
+from smc_filter import SMCParticleFilter, covariance_to_features
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,21 @@ class PolicyEngine:
         self.shots_encoding = checkpoint_data["shots_encoding"]
         self.include_shots = bool(self.shots_encoding)
         logger.info("🔍 Metadata: meta_dim=%s, include_shots=%s", self.meta_dim, self.include_shots)
+
+        self.metadata_layout = MetadataLayout.from_problem(self.n_qubits, self.M_evo)
+        if self.meta_dim != self.metadata_layout.meta_dim:
+            raise ValueError(
+                "Checkpoint metadata dimension mismatch: "
+                f"checkpoint meta_dim={self.meta_dim}, "
+                f"expected={self.metadata_layout.meta_dim} for "
+                f"{self.n_qubits} qubits and M_evo={self.M_evo}."
+            )
+        self.theta_dim = self.metadata_layout.theta_dim
+        self.cov_feat_dim = self.metadata_layout.cov_feat_dim
+        self.theta_slot0 = self.metadata_layout.theta_slot0
+        self.cov_slot0 = self.metadata_layout.cov_slot0
+        self.fisher_slot0 = self.metadata_layout.fisher_slot0
+        self.shots_slot = self.metadata_layout.shots_slot
         
         is_simple_estimator = self._detect_simple_estimator(state_dict)
         
@@ -88,6 +103,15 @@ class PolicyEngine:
         
         self.symqnet.eval()
         logger.info(" Models loaded with EXACT architecture match")
+
+        self.belief_env = SpinChainEnv(
+            N=self.n_qubits,
+            M_evo=self.M_evo,
+            T=self.T,
+            device=self.device,
+            resample_each_reset=False,
+        )
+        self.smc = SMCParticleFilter(self.belief_env, device=self.device)
 
     def _validate_checkpoint(self, checkpoint: Any) -> Dict[str, Any]:
         """Validate checkpoint schema and return normalized checkpoint data."""
@@ -184,71 +208,46 @@ class PolicyEngine:
     def _create_minimal_model(self, state_dict, n_qubits, M_evo, A, meta_dim):
         """Create minimal model matching training's estimator architecture."""
         
-        estimator_keys = [key for key in state_dict.keys() if 'estimator' in key]
-        is_mlp_estimator = any('estimator.0.' in key or 'estimator.2.' in key or 'estimator.4.' in key 
-                              for key in estimator_keys)
-        
         class MinimalSymQNet(nn.Module):
-            def __init__(self, vae, n_qubits, device, is_mlp, meta_dim):
+            def __init__(self, vae, n_qubits, device, meta_dim):
                 super().__init__()
                 self.vae = vae
                 self.device = device
                 self.n_qubits = n_qubits
-                
-                input_dim = 64 + meta_dim  # VAE + metadata
-                output_dim = 2 * n_qubits - 1  # J + h parameters
-                
-                if is_mlp:
-                    self.estimator = nn.Sequential(
-                        nn.Linear(input_dim, 128),
-                        nn.ReLU(),
-                        nn.Linear(128, 64),
-                        nn.ReLU(),
-                        nn.Linear(64, output_dim)
-                    )
-                else:
-                    self.estimator = nn.Linear(input_dim, output_dim)
-                
-                self.step_count = 0
-                
+                self.meta_dim = meta_dim
+            
             def forward(self, obs, metadata, deterministic_inference: bool = False):
                 if obs.dim() == 1:
                     obs = obs.unsqueeze(0)  # [10] -> [1, 10]
                 if metadata.dim() == 1:
                     metadata = metadata.unsqueeze(0)  # [meta] -> [1, meta]
                 
+                if metadata.shape[-1] != self.meta_dim:
+                    raise ValueError(
+                        f"Metadata dimension mismatch: expected {self.meta_dim}, "
+                        f"got {metadata.shape[-1]}"
+                    )
+
                 # VAE encoding
                 with torch.no_grad():
                     mu_z, logvar_z = self.vae.encode(obs)
                     z = self.vae.reparameterize(mu_z, logvar_z)  # [1, 64]
                 
-                # Concatenate with metadata
-                z_with_meta = torch.cat([z, metadata], dim=-1)  # [1, L + meta]
-                
-                # Estimate parameters
-                theta_hat = self.estimator(z_with_meta)  # [1, 2*n_qubits-1]
-                
-
-                theta_hat = theta_hat.squeeze(0)  # [1, 2*n_qubits-1] -> [2*n_qubits-1]
-                
                 # Create dummy policy outputs
                 action_probs = torch.ones(A, device=self.device) / A
                 dummy_dist = torch.distributions.Categorical(probs=action_probs)
                 dummy_value = torch.tensor(0.0, device=self.device)
-                
-                return dummy_dist, dummy_value, theta_hat
+
+                return dummy_dist, dummy_value
             
             def reset_buffer(self):
-                self.step_count = 0
+                return None
         
         self.symqnet = MinimalSymQNet(
             self.vae,
             n_qubits,
-            self.T,
-            A,
-            M_evo,
+            self.device,
             meta_dim,
-            allow_partial=True,
         )
     
     def _create_full_model(self, state_dict, n_qubits, T, A, M_evo, meta_dim, allow_partial: bool = False):
@@ -294,12 +293,46 @@ class PolicyEngine:
             self.symqnet.reset_buffer()
         self.step_count = 0
         self.parameter_history = []
-        self.zero_theta_steps = 0
         self.convergence_threshold = 1e-7
         self.convergence_window = 10
         self.last_action = None
+        if hasattr(self, "theta_dim") and hasattr(self, "cov_feat_dim"):
+            self.prev_theta_feat = torch.zeros(self.theta_dim, device=self.device)
+            self.prev_cov_feat = torch.zeros(self.cov_feat_dim, device=self.device)
+            self.prev_fisher_feat = torch.zeros(self.theta_dim, device=self.device)
+        if hasattr(self, "smc") and self.smc is not None:
+            self.smc.reset()
         
         logger.debug(" Policy engine state reset")
+
+    def _update_belief(self, obs_tensor: torch.Tensor) -> None:
+        """Update SMC belief using the latest observation and previous action."""
+        if not hasattr(self, "smc") or self.smc is None:
+            return
+        if self.last_action is None:
+            return
+
+        info = {
+            "qubit_idx": int(self.last_action.get("qubits", [0])[0]),
+            "basis_idx": int(self.last_action.get("basis_idx", 0)),
+            "time_idx": int(self.last_action.get("time_idx", 0)),
+            "shots": int(self.shots or 1),
+        }
+
+        theta_mean, theta_cov = self.smc.update(obs_tensor, info)
+        if theta_mean.numel() != self.theta_dim:
+            raise InferenceError(
+                f"Posterior mean shape mismatch: expected {self.theta_dim}, "
+                f"got {theta_mean.numel()}"
+            )
+        if torch.isnan(theta_mean).any() or torch.isnan(theta_cov).any():
+            raise InferenceError("SMC posterior contains NaNs; check metadata inputs.")
+
+        self.prev_theta_feat = theta_mean.detach()
+        self.prev_cov_feat = covariance_to_features(theta_cov).detach()
+        precision = torch.linalg.pinv(theta_cov)
+        self.prev_fisher_feat = torch.diag(precision).detach()
+        self.parameter_history.append(theta_mean.detach().cpu().numpy())
     
     def get_action(self, current_measurement: np.ndarray) -> Dict[str, Any]:
         """Get next measurement action from policy with EXACT metadata."""
@@ -314,52 +347,14 @@ class PolicyEngine:
             current_measurement = padded_measurement
         
         obs_tensor = torch.from_numpy(current_measurement).float().to(self.device)  # [n_qubits]
+        self._update_belief(obs_tensor)
         metadata = self._create_metadata(self.last_action)  # [meta_dim]
         
         logger.debug(f" Input shapes: obs={obs_tensor.shape}, metadata={metadata.shape}")
         
         try:
             with torch.no_grad():
-                dist, value, theta_estimate = self.symqnet(obs_tensor, metadata)
-                
-
-                if theta_estimate is None:
-                    logger.error(" theta_estimate is None!")
-                    theta_estimate = torch.zeros(2 * self.n_qubits - 1, device=self.device)
-                
-                if theta_estimate.numel() == 0:
-                    logger.error(" theta_estimate is empty!")
-                    theta_estimate = torch.zeros(2 * self.n_qubits - 1, device=self.device)
-                
-                # Convert to numpy and validate
-                theta_np = theta_estimate.detach().cpu().numpy()
-
-                if theta_np.ndim > 1:
-                    theta_np = np.squeeze(theta_np)
-
-                expected_dim = 2 * self.n_qubits - 1
-                if theta_np.size == expected_dim and theta_np.shape != (expected_dim,):
-                    theta_np = theta_np.reshape(expected_dim)
-
-                if theta_np.shape != (expected_dim,):
-                    logger.error(f" Wrong parameter shape: {theta_np.shape} (size={theta_np.size})")
-                    theta_np = np.zeros(expected_dim)
-                
-                if np.allclose(theta_np, 0, atol=1e-10):
-                    logger.warning(f" All parameters are zero at step {self.step_count}")
-                    self.zero_theta_steps += 1
-                    if self.zero_theta_steps >= 3:
-                        raise InferenceError(
-                            "theta_estimate has been all zeros for multiple steps. "
-                            "This indicates inference is broken (model load mismatch, "
-                            "wrong input shape, or corrupted weights). The MAE is not "
-                            "expected to vary with shots until inference is fixed."
-                        )
-                else:
-                    logger.debug(f" Got non-zero parameters: range [{theta_np.min():.6f}, {theta_np.max():.6f}]")
-                    self.zero_theta_steps = 0
-                
-                self.parameter_history.append(theta_np)
+                dist, value = self.symqnet(obs_tensor, metadata)
                 
                 # Generate action
                 action_idx = dist.sample().item()
@@ -386,14 +381,10 @@ class PolicyEngine:
         n_qubits = self.n_qubits
         M_evo = self.M_evo
         metadata = torch.zeros(self.meta_dim, device=self.device)
-        required_dim = n_qubits + 3 + M_evo
-        if metadata.numel() < required_dim:
-            logger.warning(
-                "⚠️ Metadata dim (%s) smaller than required (%s); returning zeros.",
-                metadata.numel(),
-                required_dim,
+        if metadata.numel() != self.meta_dim:
+            raise ValueError(
+                f"Metadata size mismatch: expected {self.meta_dim}, got {metadata.numel()}"
             )
-            return metadata
         
         if action_info:
             qubits = action_info.get('qubits') or []
@@ -418,8 +409,23 @@ class PolicyEngine:
             metadata[n_qubits + bi] = 1.0
             metadata[n_qubits + 3 + ti] = 1.0
 
-        if self.include_shots and metadata.numel() > required_dim:
-            metadata[-1] = self._normalize_shots()
+        if self.include_shots:
+            metadata[self.shots_slot] = self._normalize_shots()
+
+        theta_slice = slice(self.theta_slot0, self.theta_slot0 + self.theta_dim)
+        cov_slice = slice(self.cov_slot0, self.cov_slot0 + self.cov_feat_dim)
+        fisher_slice = slice(self.fisher_slot0, self.fisher_slot0 + self.theta_dim)
+
+        if self.prev_theta_feat.numel() != self.theta_dim:
+            raise ValueError("Posterior mean feature dimension mismatch.")
+        if self.prev_cov_feat.numel() != self.cov_feat_dim:
+            raise ValueError("Posterior covariance feature dimension mismatch.")
+        if self.prev_fisher_feat.numel() != self.theta_dim:
+            raise ValueError("Posterior fisher feature dimension mismatch.")
+
+        metadata[theta_slice] = self.prev_theta_feat
+        metadata[cov_slice] = self.prev_cov_feat
+        metadata[fisher_slice] = self.prev_fisher_feat
 
         return metadata
 

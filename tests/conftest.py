@@ -9,6 +9,8 @@ import tempfile
 import os
 from pathlib import Path
 
+from architectures import MetadataLayout
+
 
 @pytest.fixture
 def device():
@@ -157,13 +159,14 @@ def set_random_seeds():
 @pytest.fixture
 def symqnet_config():
     """Provide SymQNet configuration parameters"""
+    layout = MetadataLayout.from_problem(n_qubits=10, M_evo=5)
     return {
         'n_qubits': 10,
         'L': 64,  # Base latent dimension
         'T': 10,
         'M_evo': 5,
         'A': 150,  # 10 * 3 * 5
-        'meta_dim': 84,  # action + shots + belief features
+        'meta_dim': layout.meta_dim,
         'total_params': 19  # 9 coupling + 10 field
     }
 

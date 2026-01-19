@@ -16,6 +16,65 @@ from pathlib import Path
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from architectures import MetadataLayout, SpinChainEnv
+from smc_filter import SMCParticleFilter, covariance_to_features
+
+
+def normalize_shots(shots: int) -> float:
+    """Normalize shot count into [0, 1] for metadata conditioning."""
+    shot_value = max(0, int(shots))
+    return float(np.log1p(shot_value) / np.log1p(1_000_000))
+
+
+def init_smc_belief(n_qubits: int, M_evo: int, device: torch.device) -> SMCParticleFilter:
+    """Initialize a compact SMC belief filter for metadata updates."""
+    belief_env = SpinChainEnv(
+        N=n_qubits,
+        M_evo=M_evo,
+        T=10,
+        device=device,
+        resample_each_reset=False,
+    )
+    return SMCParticleFilter(belief_env, n_particles=4, device=device)
+
+
+def build_metadata_with_belief(
+    layout: MetadataLayout,
+    smc: SMCParticleFilter,
+    obs: torch.Tensor,
+    action_info: dict,
+    shots: int,
+) -> torch.Tensor:
+    """Build metadata using SMC belief updates and the latest action."""
+    metadata = torch.zeros(layout.meta_dim, device=obs.device)
+    qubit_idx = int(action_info.get("qubit_idx", 0))
+    basis_idx = int(action_info.get("basis_idx", 2))
+    time_idx = int(action_info.get("time_idx", 0))
+
+    metadata[qubit_idx] = 1.0
+    metadata[layout.n_qubits + basis_idx] = 1.0
+    metadata[layout.n_qubits + 3 + time_idx] = 1.0
+    metadata[layout.shots_slot] = normalize_shots(shots)
+
+    theta_mean, theta_cov = smc.update(
+        obs,
+        {
+            "qubit_idx": qubit_idx,
+            "basis_idx": basis_idx,
+            "time_idx": time_idx,
+            "shots": shots,
+        },
+    )
+
+    theta_slice = slice(layout.theta_slot0, layout.theta_slot0 + layout.theta_dim)
+    cov_slice = slice(layout.cov_slot0, layout.cov_slot0 + layout.cov_feat_dim)
+    fisher_slice = slice(layout.fisher_slot0, layout.fisher_slot0 + layout.theta_dim)
+
+    metadata[theta_slice] = theta_mean
+    metadata[cov_slice] = covariance_to_features(theta_cov)
+    metadata[fisher_slice] = torch.diag(torch.linalg.pinv(theta_cov))
+    return metadata
+
 def print_test_header(title):
     """Print formatted test header"""
     print(f" {title}")
@@ -249,10 +308,13 @@ def test_complete_symqnet():
         )
         print_test_result("SymQNet creation", True, f"n_qubits={n_qubits}, A={A}")
         
-        # Test forward pass
-        obs = torch.randn(10)
-        metadata = torch.zeros(84)  # action + shots + belief features
-        
+        # Test forward pass with SMC belief metadata
+        obs = torch.tanh(torch.randn(10))
+        layout = MetadataLayout.from_problem(n_qubits, M_evo)
+        smc = init_smc_belief(n_qubits, M_evo, obs.device)
+        action_info = {"qubit_idx": 0, "basis_idx": 2, "time_idx": 0}
+        metadata = build_metadata_with_belief(layout, smc, obs, action_info, shots=256)
+
         dist, value = symqnet(obs, metadata)
         
         # Check outputs
@@ -265,8 +327,15 @@ def test_complete_symqnet():
         # Test multiple steps (ring buffer)
         symqnet.reset_buffer()
         for step in range(5):
-            obs_step = torch.randn(10) 
-            metadata_step = torch.zeros(84)
+            obs_step = torch.tanh(torch.randn(10))
+            action_info = {
+                "qubit_idx": step % n_qubits,
+                "basis_idx": step % 3,
+                "time_idx": step % M_evo,
+            }
+            metadata_step = build_metadata_with_belief(
+                layout, smc, obs_step, action_info, shots=256
+            )
             dist_step, value_step = symqnet(obs_step, metadata_step)
         
         buffer_ok = len(symqnet.zG_history) == 5
@@ -356,10 +425,13 @@ def test_model_loading():
         symqnet.eval()
         print_test_result("SymQNet weight loading", True, "Weights loaded successfully")
         
-        # Test full forward pass
-        obs = torch.randn(10)
-        metadata = torch.zeros(84)
-        
+        # Test full forward pass with SMC belief metadata
+        obs = torch.tanh(torch.randn(10, device=device))
+        layout = MetadataLayout.from_problem(n_qubits, M_evo)
+        smc = init_smc_belief(n_qubits, M_evo, device)
+        action_info = {"qubit_idx": 0, "basis_idx": 2, "time_idx": 0}
+        metadata = build_metadata_with_belief(layout, smc, obs, action_info, shots=256)
+
         with torch.no_grad():
             dist, value = symqnet(obs, metadata)
         

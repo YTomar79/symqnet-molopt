@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import logging
 
 
@@ -51,9 +51,10 @@ class PolicyEngine:
     
     def _load_models(self):
         """Load pre-trained VAE and SymQNet models with EXACT architecture matching."""
-        
-        self.vae = VariationalAutoencoder(M=10, L=64).to(self.device)
+
         vae_state = torch.load(self.vae_path, map_location=self.device, weights_only=False)
+        vae_M, vae_L = self._infer_vae_dims(vae_state)
+        self.vae = VariationalAutoencoder(M=vae_M, L=vae_L).to(self.device)
         self.vae.load_state_dict(vae_state)
         self.vae.eval()
         for p in self.vae.parameters():
@@ -112,6 +113,28 @@ class PolicyEngine:
             resample_each_reset=False,
         )
         self.smc = SMCParticleFilter(self.belief_env, device=self.device)
+
+    def _infer_vae_dims(self, vae_state: Dict[str, torch.Tensor]) -> Tuple[int, int]:
+        """Infer VAE input/output (M) and latent (L) dims from state dict."""
+        enc_fc1 = vae_state.get("enc_fc1.weight")
+        enc_mu = vae_state.get("enc_mu.weight")
+        dec_out = vae_state.get("dec_out.weight")
+
+        if enc_fc1 is None or enc_mu is None or dec_out is None:
+            raise ValueError(
+                "VAE checkpoint is missing required weights (enc_fc1.weight, enc_mu.weight, dec_out.weight)."
+            )
+
+        inferred_M = int(enc_fc1.shape[1])
+        inferred_L = int(enc_mu.shape[0])
+
+        if int(dec_out.shape[0]) != inferred_M:
+            raise ValueError(
+                "VAE checkpoint dimension mismatch: "
+                f"enc_fc1.weight expects M={inferred_M}, but dec_out.weight has M={int(dec_out.shape[0])}."
+            )
+
+        return inferred_M, inferred_L
 
     def _validate_checkpoint(self, checkpoint: Any) -> Dict[str, Any]:
         """Validate checkpoint schema and return normalized checkpoint data."""

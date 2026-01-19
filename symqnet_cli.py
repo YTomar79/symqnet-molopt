@@ -335,7 +335,7 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
     if UNIVERSAL_MODE:
         logger.info("Using Universal SymQNet with parameter extraction")
         
-        # Step 1: Normalize Hamiltonian for 10-qubit processing
+        # Step 1: Normalize Hamiltonian for trained-qubit processing
         universal_wrapper = UniversalSymQNetWrapper(
             trained_model_path=model_path,
             trained_vae_path=vae_path,
@@ -344,73 +344,31 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
         
         # Get normalized hamiltonian
         normalized_hamiltonian = universal_wrapper._normalize_hamiltonian(hamiltonian_data)
-        logger.info(f"🔄 Normalized {original_qubits}-qubit → 10-qubit system")
+        if normalized_hamiltonian.get("n_qubits") != universal_wrapper.trained_qubits:
+            logger.warning(
+                "Normalized Hamiltonian qubit count mismatch; "
+                "forcing to trained qubit count for rollouts."
+            )
+            normalized_hamiltonian = {
+                **normalized_hamiltonian,
+                "n_qubits": universal_wrapper.trained_qubits
+            }
+        logger.info(
+            f"🔄 Normalized {original_qubits}-qubit → "
+            f"{universal_wrapper.trained_qubits}-qubit system"
+        )
         
-        # Step 2: Use the PROVEN WORKING rollout logic on normalized system
-        policy = PolicyEngine(model_path, vae_path, device, shots=shots)
-        simulator = MeasurementSimulator(normalized_hamiltonian, shots, device)
-        estimator = BootstrapEstimator()
-        
-        # Step 3: Run rollouts with the WORKING logic
-        rollout_results = []
+        # Step 2: Run rollouts through the wrapper to ensure consistent metadata layout
         try:
-            for i in range(n_rollouts):
-                logger.info(f" Universal rollout {i+1}/{n_rollouts}")
-                policy.reset()
-                
-                measurements = []
-                parameter_estimates = []
-                current_measurement = simulator.get_initial_measurement()
-                
-                for step in range(max_steps):
-                    #  THIS IS THE WORKING LOGIC FROM FALLBACK MODE
-                    action_info = policy.get_action(current_measurement)
-                    measurement_result = simulator.execute_measurement(
-                        qubit_indices=action_info['qubits'],
-                        pauli_operators=action_info['operators'],
-                        evolution_time=action_info['time']
-                    )
-                    
-                    measurements.append(measurement_result)
-                    
-                    #  This call actually works!
-                    param_estimate = policy.get_parameter_estimate()
-                    parameter_estimates.append(param_estimate)
-                    
-                    measurement_mask = measurement_result['measurement_mask']
-                    current_measurement[measurement_mask] = (
-                        measurement_result['expectation_values'][measurement_mask]
-                    )
-                    
-                    # Debug: Check if we're getting real parameters
-                    if step == 0:
-                        logger.debug(f" First parameter estimate: shape={param_estimate.shape}, "
-                                    f"range=[{param_estimate.min():.6f}, {param_estimate.max():.6f}]")
-                    
-                    if step > 5 and policy.has_converged(parameter_estimates):
-                        logger.debug(f"Converged at step {step}")
-                        break
-                
-                # Store rollout results
-                rollout_results.append({
-                    'rollout_id': i,
-                    'measurements': measurements,
-                    'parameter_estimates': parameter_estimates,
-                    'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
-                    'convergence_step': step
-                })
-                
-                # Debug final estimate
-                if parameter_estimates:
-                    final_est = parameter_estimates[-1]
-                    logger.debug(f"Rollout {i} final estimate: shape={final_est.shape}, "
-                               f"non-zero: {not np.allclose(final_est, 0)}")
+            normalized_results = universal_wrapper._run_optimization(
+                normalized_hamiltonian, shots, n_rollouts, max_steps
+            )
         except InferenceError as e:
             logger.error(f"Aborting optimization due to inference failure: {e}")
             logger.error("MAE will be invalid if inference is broken.")
             return {
                 'symqnet_results': None,
-                'rollout_results': rollout_results,
+                'rollout_results': [],
                 'error': {
                     'type': type(e).__name__,
                     'message': str(e),
@@ -418,31 +376,26 @@ def run_optimization_universal(hamiltonian_data, model_path, vae_path, device, s
                 'aborted': True,
                 'universal_metadata': {
                     'original_qubits': original_qubits,
-                    'normalized_to': 10,
+                    'normalized_to': universal_wrapper.trained_qubits,
                     'normalization_applied': True,
                 }
             }
         
-        # Step 4: Bootstrap analysis on 10-qubit results
-        logger.info("📊 Computing confidence intervals on normalized results...")
-        bootstrap_results = estimator.compute_intervals(rollout_results)
-        
-        # Step 5: Denormalize results back to original system
-        logger.info(f"🔄 Denormalizing results: 10-qubit → {original_qubits}-qubit")
-        normalized_results = {
-            'symqnet_results': bootstrap_results,
-            'rollout_results': rollout_results
-        }
+        # Step 3: Denormalize results back to original system
+        logger.info(
+            f"🔄 Denormalizing results: {universal_wrapper.trained_qubits}-qubit → "
+            f"{original_qubits}-qubit"
+        )
         
         final_results = universal_wrapper._denormalize_results(normalized_results, original_qubits)
         
         # Add universal metadata
         final_results['universal_metadata'] = {
             'original_qubits': original_qubits,
-            'normalized_to': 10,
+            'normalized_to': universal_wrapper.trained_qubits,
             'expected_performance': universal_wrapper._calculate_performance_factor(original_qubits),
             'normalization_applied': True,
-            'optimal_at': 10,
+            'optimal_at': universal_wrapper.trained_qubits,
             'fixed_parameter_extraction': True
         }
         

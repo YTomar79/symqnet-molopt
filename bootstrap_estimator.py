@@ -30,49 +30,37 @@ class BootstrapEstimator:
         for i, estimate in enumerate(estimates):
             logger.info(f"  Rollout {i}:")
             logger.info(f"    Keys: {list(estimate.keys())}")
-            
-            # Check final_estimate
-            final_est = estimate.get('final_estimate')
-            logger.info(f"    final_estimate: {final_est}")
-            logger.info(f"    final_estimate type: {type(final_est)}")
-            
-            if final_est is not None:
-                if hasattr(final_est, 'shape'):
-                    logger.info(f"    final_estimate shape: {final_est.shape}")
-                elif hasattr(final_est, '__len__'):
-                    logger.info(f"    final_estimate length: {len(final_est)}")
-                
-                # Check if it's all zeros
+
+            posterior_mean = estimate.get('smc_posterior_mean') or estimate.get('posterior_mean')
+            posterior_cov = estimate.get('smc_posterior_cov') or estimate.get('posterior_cov')
+
+            logger.info(f"    smc_posterior_mean: {posterior_mean}")
+            logger.info(f"    smc_posterior_cov: {posterior_cov}")
+            logger.info(f"    smc_posterior_mean type: {type(posterior_mean)}")
+            logger.info(f"    smc_posterior_cov type: {type(posterior_cov)}")
+
+            if posterior_mean is not None:
+                if hasattr(posterior_mean, 'shape'):
+                    logger.info(f"    smc_posterior_mean shape: {posterior_mean.shape}")
+                elif hasattr(posterior_mean, '__len__'):
+                    logger.info(f"    smc_posterior_mean length: {len(posterior_mean)}")
+
                 try:
-                    final_array = np.array(final_est)
-                    if final_array.size > 0:
-                        all_zero = np.allclose(final_array, 0, atol=1e-10)
-                        logger.info(f"    final_estimate all zeros: {all_zero}")
-                        if not all_zero:
-                            logger.info(f"    final_estimate range: [{final_array.min():.6f}, {final_array.max():.6f}]")
-                except:
-                    logger.info(f"    Cannot convert final_estimate to array")
-            
-            # Check parameter_estimates
-            param_ests = estimate.get('parameter_estimates', [])
-            logger.info(f"    parameter_estimates length: {len(param_ests)}")
-            
-            if param_ests:
-                logger.info(f"    First param_estimate: {param_ests[0]}")
-                logger.info(f"    Last param_estimate: {param_ests[-1]}")
-                
-                # Check if any are non-zero
-                non_zero_count = 0
-                for pe in param_ests:
-                    if pe is not None:
-                        try:
-                            pe_array = np.array(pe)
-                            if pe_array.size > 0 and not np.allclose(pe_array, 0, atol=1e-10):
-                                non_zero_count += 1
-                        except:
-                            pass
-                logger.info(f"    Non-zero parameter estimates: {non_zero_count}/{len(param_ests)}")
-            
+                    mean_array = np.array(posterior_mean)
+                    if mean_array.size > 0:
+                        mean_min = mean_array.min()
+                        mean_max = mean_array.max()
+                        logger.info(f"    smc_posterior_mean range: [{mean_min:.6f}, {mean_max:.6f}]")
+                except Exception:
+                    logger.info("    Cannot convert smc_posterior_mean to array")
+
+            if posterior_cov is not None:
+                try:
+                    cov_array = np.array(posterior_cov)
+                    logger.info(f"    smc_posterior_cov shape: {cov_array.shape}")
+                except Exception:
+                    logger.info("    Cannot convert smc_posterior_cov to array")
+
             # Check convergence step
             conv_step = estimate.get('convergence_step', 0)
             logger.info(f"    convergence_step: {conv_step}")
@@ -81,87 +69,107 @@ class BootstrapEstimator:
         if not estimates:
             raise ValueError("No rollout estimates provided")
         
-        # Extract final parameter estimates from each rollout
+        # Extract posterior means and covariances from each rollout
         final_estimates = []
         convergence_steps = []
-        rollouts_with_nonzero = 0
+        rollouts_with_valid_posterior = 0
+        rollouts_missing_posterior = 0
+        rollouts_degenerate = 0
+        rollouts_high_variance = 0
+
+        min_variance = 1e-12
+        max_variance = 1e3
         
         for i, estimate in enumerate(estimates):
-            final_est = estimate.get('final_estimate')
-            rollout_has_nonzero = False
-            
-            if final_est is not None:
-                try:
-                    # Convert to numpy array
-                    final_array = np.array(final_est)
-                    
-                    # Check if it's valid (not empty, not all zeros)
-                    if final_array.size > 0:
-                        if not np.allclose(final_array, 0, atol=1e-10):
-                            final_estimates.append(final_array)
-                            convergence_steps.append(estimate.get('convergence_step', 0))
-                            logger.info(f" Rollout {i}: Valid final estimate with {final_array.size} parameters")
-                            rollout_has_nonzero = True
-                        else:
-                            logger.warning(f" Rollout {i}: final_estimate is all zeros - skipping")
-                    else:
-                        logger.warning(f" Rollout {i}: final_estimate is empty - skipping")
-                except Exception as e:
-                    logger.warning(f" Rollout {i}: Cannot process final_estimate: {e}")
-            else:
-                logger.warning(f" Rollout {i}: No final_estimate - checking parameter_estimates...")
-                
-                # 🔧 FALLBACK: Try to extract from parameter_estimates
-                param_ests = estimate.get('parameter_estimates', [])
-                if param_ests:
-                    for pe in reversed(param_ests):  # Start from last
-                        if pe is not None:
-                            try:
-                                pe_array = np.array(pe)
-                                if pe_array.size > 0 and not np.allclose(pe_array, 0, atol=1e-10):
-                                    final_estimates.append(pe_array)
-                                    convergence_steps.append(len(param_ests))
-                                    logger.info(f" Rollout {i}: Extracted from parameter_estimates")
-                                    rollout_has_nonzero = True
-                                    break
-                            except:
-                                continue
-                else:
-                    logger.warning(f" Rollout {i}: No parameter_estimates provided")
+            posterior_mean = estimate.get('smc_posterior_mean') or estimate.get('posterior_mean')
+            posterior_cov = estimate.get('smc_posterior_cov') or estimate.get('posterior_cov')
 
-            if not rollout_has_nonzero:
-                for pe in estimate.get('parameter_estimates', []) or []:
-                    try:
-                        pe_array = np.array(pe)
-                        if pe_array.size > 0 and not np.allclose(pe_array, 0, atol=1e-10):
-                            rollout_has_nonzero = True
-                            break
-                    except Exception:
-                        continue
+            if posterior_mean is None or posterior_cov is None:
+                if posterior_mean is None and estimate.get('final_estimate') is not None:
+                    logger.warning(
+                        f" Rollout {i}: Missing SMC posterior mean; "
+                        "falling back to final_estimate (deprecated)."
+                    )
+                    posterior_mean = estimate.get('final_estimate')
+                if posterior_cov is None:
+                    logger.warning(f" Rollout {i}: Missing SMC posterior covariance - skipping")
+                rollouts_missing_posterior += 1
+                if posterior_cov is None:
+                    continue
 
-            if rollout_has_nonzero:
-                rollouts_with_nonzero += 1
+            try:
+                mean_array = np.array(posterior_mean, dtype=float).reshape(-1)
+                cov_array = np.array(posterior_cov, dtype=float)
+            except Exception as e:
+                logger.warning(f" Rollout {i}: Cannot process posterior mean/cov: {e}")
+                rollouts_missing_posterior += 1
+                continue
+
+            if mean_array.size == 0:
+                logger.warning(f" Rollout {i}: Posterior mean is empty - skipping")
+                rollouts_missing_posterior += 1
+                continue
+
+            if cov_array.ndim != 2 or cov_array.shape[0] != cov_array.shape[1]:
+                logger.warning(f" Rollout {i}: Posterior covariance shape invalid - skipping")
+                rollouts_missing_posterior += 1
+                continue
+
+            if cov_array.shape[0] != mean_array.size:
+                logger.warning(
+                    f" Rollout {i}: Posterior covariance dimension mismatch "
+                    f"({cov_array.shape[0]} vs {mean_array.size}) - skipping"
+                )
+                rollouts_missing_posterior += 1
+                continue
+
+            if not np.isfinite(mean_array).all() or not np.isfinite(cov_array).all():
+                logger.warning(f" Rollout {i}: Non-finite posterior mean/cov - skipping")
+                rollouts_missing_posterior += 1
+                continue
+
+            variances = np.diag(cov_array)
+            if np.any(variances < 0):
+                logger.warning(f" Rollout {i}: Negative variances in posterior covariance - skipping")
+                rollouts_degenerate += 1
+                continue
+
+            mean_variance = float(np.mean(variances))
+            if mean_variance <= min_variance:
+                logger.warning(f" Rollout {i}: Degenerate posterior covariance (variance too small) - skipping")
+                rollouts_degenerate += 1
+                continue
+
+            if mean_variance >= max_variance:
+                logger.warning(f" Rollout {i}: High-variance posterior (variance={mean_variance:.3e}) - skipping")
+                rollouts_high_variance += 1
+                continue
+
+            final_estimates.append(mean_array)
+            convergence_steps.append(estimate.get('convergence_step', 0))
+            logger.info(f" Rollout {i}: Valid posterior mean with {mean_array.size} parameters")
+            rollouts_with_valid_posterior += 1
         
         logger.info(f"🎯 SUMMARY: Found {len(final_estimates)} valid parameter estimates from {len(estimates)} rollouts")
 
-        if rollouts_with_nonzero == 0:
+        if rollouts_with_valid_posterior == 0:
             message = (
-                "All rollouts returned theta_estimate values that are all zeros. "
-                "This indicates inference is broken (model load mismatch, wrong input "
-                "shape, or corrupted weights). The MAE is not expected to vary with "
-                "shots until inference is fixed."
+                "All rollouts produced invalid SMC posterior summaries. "
+                "Posterior mean/covariance were missing, degenerate, or high-variance. "
+                "This indicates SMC inference is unstable (metadata mismatch, invalid "
+                "inputs, or collapsed particle weights)."
             )
             logger.error(message)
             raise ValueError(message)
         
         if not final_estimates:
             logger.error(" NO VALID PARAMETER ESTIMATES FOUND!")
-            logger.error("This means the policy engine is not generating meaningful parameters")
+            logger.error("This means the SMC posterior is not producing valid mean/covariance")
             logger.error("Possible causes:")
-            logger.error("1. Neural network not loaded properly")
-            logger.error("2. Input tensor shapes are wrong") 
-            logger.error("3. Model weights are corrupted")
-            logger.error("4. get_parameter_estimate() always returns zeros")
+            logger.error("1. SMC particle filter collapsed or diverged")
+            logger.error("2. Invalid metadata or measurement inputs")
+            logger.error("3. Covariance is degenerate or numerically unstable")
+            logger.error("4. Posterior variance is unbounded or too noisy")
             
             # Return empty results instead of crashing
             return {
@@ -172,12 +180,20 @@ class BootstrapEstimator:
                 'std_measurements': 0.0,
                 'confidence_level': self.confidence_level,
                 'total_uncertainty': 0.0,
-                'error': 'No valid parameter estimates found - check policy engine',
+                'error': 'No valid SMC posterior summaries found - check SMC filter',
                 'debug_info': {
                     'rollouts_received': len(estimates),
-                    'rollouts_with_final_estimate': sum(1 for e in estimates if e.get('final_estimate') is not None),
-                    'rollouts_with_param_estimates': sum(1 for e in estimates if e.get('parameter_estimates')),
-                    'avg_param_estimates_per_rollout': np.mean([len(e.get('parameter_estimates', [])) for e in estimates])
+                    'rollouts_missing_posterior': rollouts_missing_posterior,
+                    'rollouts_degenerate': rollouts_degenerate,
+                    'rollouts_high_variance': rollouts_high_variance,
+                    'rollouts_with_posterior_mean': sum(
+                        1 for e in estimates
+                        if e.get('smc_posterior_mean') is not None or e.get('posterior_mean') is not None
+                    ),
+                    'rollouts_with_posterior_cov': sum(
+                        1 for e in estimates
+                        if e.get('smc_posterior_cov') is not None or e.get('posterior_cov') is not None
+                    )
                 }
             }
         

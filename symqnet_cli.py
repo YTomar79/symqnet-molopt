@@ -129,7 +129,13 @@ def ensure_model_files(model_path: Optional[Path],
         except Exception as e:
             raise click.ClickException(f"Failed to download {filepath.name}: {e}")
 
-    def _resolve(user: Optional[Path], bundled_dir: Path, rel_default: Path, url: str) -> Path:
+    def _resolve(
+        user: Optional[Path],
+        bundled_dir: Path,
+        installed_dir: Path,
+        rel_default: Path,
+        url: str,
+    ) -> Path:
         # 1. User-provided path
         if user is not None:
             up = Path(user).expanduser().resolve()
@@ -142,12 +148,17 @@ def ensure_model_files(model_path: Optional[Path],
         bp = bundled_dir / filename
         if bp.exists():
             return bp
+
+        # 3. Installed data_files (sys.prefix/models)
+        ip = installed_dir / filename
+        if ip.exists():
+            return ip
             
-        # 3. Local ./models/
+        # 4. Local ./models/
         if rel_default.exists():
             return rel_default
             
-        # 4. Auto-download as last resort
+        # 5. Auto-download as last resort
         return _download_file(url, rel_default)
 
     # Find wheel-bundled models directory
@@ -161,10 +172,11 @@ def ensure_model_files(model_path: Optional[Path],
     cwd_models = Path.cwd() / "models"
     rel_model = cwd_models / MODEL_FILE
     rel_vae = cwd_models / VAE_FILE
+    installed_models = Path(sys.prefix) / "models"
 
     try:
-        final_model = _resolve(model_path, bundled_models, rel_model, MODEL_URL)
-        final_vae = _resolve(vae_path, bundled_models, rel_vae, VAE_URL)
+        final_model = _resolve(model_path, bundled_models, installed_models, rel_model, MODEL_URL)
+        final_vae = _resolve(vae_path, bundled_models, installed_models, rel_vae, VAE_URL)
         return final_model, final_vae
     except Exception as e:
         raise click.ClickException(f" Model resolution failed: {e}")

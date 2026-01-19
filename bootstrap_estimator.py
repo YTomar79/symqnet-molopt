@@ -31,8 +31,12 @@ class BootstrapEstimator:
             logger.info(f"  Rollout {i}:")
             logger.info(f"    Keys: {list(estimate.keys())}")
 
-            posterior_mean = estimate.get('smc_posterior_mean') or estimate.get('posterior_mean')
-            posterior_cov = estimate.get('smc_posterior_cov') or estimate.get('posterior_cov')
+            posterior_mean = estimate.get('smc_posterior_mean')
+            if posterior_mean is None:
+                posterior_mean = estimate.get('posterior_mean')
+            posterior_cov = estimate.get('smc_posterior_cov')
+            if posterior_cov is None:
+                posterior_cov = estimate.get('posterior_cov')
 
             logger.info(f"    smc_posterior_mean: {posterior_mean}")
             logger.info(f"    smc_posterior_cov: {posterior_cov}")
@@ -81,8 +85,12 @@ class BootstrapEstimator:
         max_variance = 1e3
         
         for i, estimate in enumerate(estimates):
-            posterior_mean = estimate.get('smc_posterior_mean') or estimate.get('posterior_mean')
-            posterior_cov = estimate.get('smc_posterior_cov') or estimate.get('posterior_cov')
+            posterior_mean = estimate.get('smc_posterior_mean')
+            if posterior_mean is None:
+                posterior_mean = estimate.get('posterior_mean')
+            posterior_cov = estimate.get('smc_posterior_cov')
+            if posterior_cov is None:
+                posterior_cov = estimate.get('posterior_cov')
 
             if posterior_mean is None or posterior_cov is None:
                 if posterior_mean is None and estimate.get('final_estimate') is not None:

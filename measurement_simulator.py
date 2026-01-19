@@ -6,7 +6,6 @@ import torch
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 import logging
-from scipy.linalg import expm
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,9 @@ class MeasurementSimulator:
         
         # Build full Hamiltonian matrix
         self.hamiltonian_matrix = self._build_hamiltonian_matrix()
+        self._hamiltonian_eigvals, self._hamiltonian_eigvecs = np.linalg.eigh(
+            self.hamiltonian_matrix
+        )
         
         # fix was to match policy_engine.py time range
         self.evolution_times = np.linspace(0.1, 1.0, 10)  # Was 0.1 to 2.0
@@ -95,7 +97,8 @@ class MeasurementSimulator:
         self.evolution_operators = {}
         
         for t in self.evolution_times:
-            U = expm(-1j * self.hamiltonian_matrix * t)
+            phases = np.exp(-1j * self._hamiltonian_eigvals * t)
+            U = (self._hamiltonian_eigvecs * phases) @ self._hamiltonian_eigvecs.conj().T
             self.evolution_operators[t] = U
         
         logger.debug(f"Precomputed {len(self.evolution_operators)} evolution operators")
@@ -116,16 +119,15 @@ class MeasurementSimulator:
         # Compute thermal state: ρ = exp(-βH) / Tr[exp(-βH)]
         beta = 1.0 / max(temperature, 1e-6)  # Avoid division by zero
         
-        # Get eigenvalues and eigenvectors
-        eigenvals, eigenvecs = np.linalg.eigh(self.hamiltonian_matrix)
-        
         # Compute thermal populations
-        thermal_pops = np.exp(-beta * (eigenvals - eigenvals.min()))  # Shift for numerical stability
+        thermal_pops = np.exp(
+            -beta * (self._hamiltonian_eigvals - self._hamiltonian_eigvals.min())
+        )
         thermal_pops /= np.sum(thermal_pops)
         
         # Sample from thermal distribution
-        state_idx = np.random.choice(len(eigenvals), p=thermal_pops)
-        psi_thermal = eigenvecs[:, state_idx]
+        state_idx = np.random.choice(len(self._hamiltonian_eigvals), p=thermal_pops)
+        psi_thermal = self._hamiltonian_eigvecs[:, state_idx]
         
         return self._measure_state_individual(psi_thermal, ['Z'] * self.n_qubits)
     

@@ -36,9 +36,30 @@ class UniversalSymQNetWrapper:
         
         # Load trained 10-qubit model
         self.policy_engine = self._load_trained_model(trained_model_path, trained_vae_path)
+
+        self._validate_policy_engine()
         
         logger.info("Universal SymQNet loaded - supports any qubit count")
         logger.info(f"Optimal performance at {self.trained_qubits} qubits")
+
+    def _validate_policy_engine(self) -> None:
+        """Validate policy engine metadata and qubit expectations."""
+        engine_qubits = getattr(self.policy_engine, "n_qubits", None)
+        if engine_qubits is None:
+            raise ValueError("Policy engine missing n_qubits metadata.")
+        if engine_qubits != self.trained_qubits:
+            raise ValueError(
+                "Policy engine qubit count mismatch: "
+                f"expected {self.trained_qubits}, got {engine_qubits}."
+            )
+        engine_meta_dim = getattr(self.policy_engine, "meta_dim", None)
+        if engine_meta_dim is None:
+            raise ValueError("Policy engine missing meta_dim metadata.")
+        if engine_meta_dim != self.metadata_dim:
+            raise ValueError(
+                "Policy engine metadata size mismatch: "
+                f"expected {self.metadata_dim}, got {engine_meta_dim}."
+            )
     
     def _load_trained_model(self, model_path: Path, vae_path: Path):
         """Load the original trained 10-qubit model"""
@@ -74,6 +95,8 @@ class UniversalSymQNetWrapper:
         """
         
         original_qubits = hamiltonian_data['n_qubits']
+
+        self._validate_qubit_scaling(original_qubits)
         
         logger.info(f" estimation: {original_qubits} qubits → {self.trained_qubits} qubits → {original_qubits} qubits")
         
@@ -149,6 +172,12 @@ class UniversalSymQNetWrapper:
                 # Scale coefficient
                 scale_factor = np.sqrt(original_qubits / self.trained_qubits) 
                 normalized_coeff = coeff * scale_factor
+
+            if not np.isfinite(scale_factor) or scale_factor <= 0:
+                raise ValueError(
+                    f"Invalid scaling factor {scale_factor} for term {i} "
+                    f"(original_qubits={original_qubits}, trained_qubits={self.trained_qubits})"
+                )
             
             # Validate normalized string length
             if len(normalized_string) != self.trained_qubits:
@@ -224,6 +253,17 @@ class UniversalSymQNetWrapper:
         logger.debug("Initializing components for normalized optimization")
 
         self.policy_engine.set_shots(shots)
+
+        if getattr(self.policy_engine, "n_qubits", None) != normalized_hamiltonian.get("n_qubits"):
+            raise ValueError(
+                "Normalized Hamiltonian qubit count does not match policy engine: "
+                f"{normalized_hamiltonian.get('n_qubits')} vs {self.policy_engine.n_qubits}."
+            )
+        if getattr(self.policy_engine, "meta_dim", None) != self.metadata_dim:
+            raise ValueError(
+                "Metadata size inconsistency detected: "
+                f"wrapper expects {self.metadata_dim}, policy engine has {self.policy_engine.meta_dim}."
+            )
         
         # Initialize components for 10-qubit normalized system
         simulator = MeasurementSimulator(
@@ -250,6 +290,10 @@ class UniversalSymQNetWrapper:
             for step in range(max_steps):
                 # Get action from policy
                 action_info = self.policy_engine.get_action(current_measurement)
+
+                posterior_mean, posterior_cov = self.policy_engine.get_posterior_summary()
+                if posterior_mean is None or posterior_cov is None:
+                    raise ValueError("Policy engine did not provide SMC posterior summary.")
                 
                 # Execute measurement
                 measurement_result = simulator.execute_measurement(
@@ -264,9 +308,8 @@ class UniversalSymQNetWrapper:
                     'result': measurement_result
                 })
                 
-                # Get parameter estimate from policy
-                param_estimate = self.policy_engine.get_parameter_estimate()
-                parameter_estimates.append(param_estimate)
+                # Record SMC posterior mean as parameter estimate
+                parameter_estimates.append(posterior_mean)
                 
                 # Update current measurement for next step
                 current_measurement = measurement_result['expectation_values']
@@ -276,11 +319,14 @@ class UniversalSymQNetWrapper:
                     logger.debug(f"Universal rollout {i} converged at step {step}")
                     break
             
+            final_posterior_mean, final_posterior_cov = self.policy_engine.get_posterior_summary()
             rollout_results.append({
                 'rollout_id': i,
                 'measurements': measurements,
                 'parameter_estimates': parameter_estimates,
                 'final_estimate': parameter_estimates[-1] if parameter_estimates else None,
+                'smc_posterior_mean': final_posterior_mean,
+                'smc_posterior_cov': final_posterior_cov,
                 'convergence_step': step
             })
         
@@ -331,6 +377,12 @@ class UniversalSymQNetWrapper:
         
         # Apply inverse scaling
         scale_factor = np.sqrt(target_qubits / self.trained_qubits)
+
+        if not np.isfinite(scale_factor) or scale_factor <= 0:
+            raise ValueError(
+                f"Invalid denormalization scale factor {scale_factor} "
+                f"(target_qubits={target_qubits}, trained_qubits={self.trained_qubits})"
+            )
         
         # Scale parameters back to original system size
         denorm_coupling = self._scale_parameters(denorm_coupling, scale_factor)
@@ -445,3 +497,12 @@ class UniversalSymQNetWrapper:
             degradation = 0.90 ** (distance * 1.2)
         
         return max(degradation, 0.3)  # Minimum 30% performance
+
+    def _validate_qubit_scaling(self, n_qubits: int) -> None:
+        """Validate qubit counts for scaling operations."""
+        if not isinstance(n_qubits, int):
+            raise ValueError(f"Expected integer n_qubits, got {type(n_qubits).__name__}")
+        if n_qubits <= 0:
+            raise ValueError(f"Invalid n_qubits value: {n_qubits}")
+        if self.trained_qubits <= 0:
+            raise ValueError(f"Invalid trained_qubits value: {self.trained_qubits}")

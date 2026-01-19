@@ -71,31 +71,17 @@ class PolicyEngine:
         
         #  PARAMETERS (explicit from checkpoint metadata)
         self.n_qubits = self._coerce_positive_int(checkpoint_data["n_qubits"], "n_qubits")
-        self.T = self._coerce_positive_int(checkpoint_data["rollout_steps"], "rollout_steps")
+        self.T = self._resolve_rollout_steps(
+            checkpoint_data["rollout_steps"],
+            state_dict,
+        )
+        if int(checkpoint_data["rollout_steps"]) != self.T:
+            checkpoint_data["rollout_steps"] = self.T
         self.M_evo = self._coerce_positive_int(checkpoint_data["M_evo"], "M_evo")
         self.A = self.n_qubits * 3 * self.M_evo  # 150 actions
         self.meta_dim = self._coerce_positive_int(checkpoint_data["meta_dim"], "meta_dim")
         self.shots_encoding = checkpoint_data["shots_encoding"]
         self.include_shots = bool(self.shots_encoding)
-        pos_emb = state_dict.get("temp_agg.pos_emb")
-        if pos_emb is not None:
-            if pos_emb.ndim < 2:
-                logger.warning(
-                    "⚠️ temp_agg.pos_emb has unexpected shape %s; "
-                    "expected [*, T, *], keeping rollout_steps=%s.",
-                    tuple(pos_emb.shape),
-                    self.T,
-                )
-            else:
-                pos_emb_T = int(pos_emb.shape[1])
-                if pos_emb_T != self.T:
-                    logger.warning(
-                        "⚠️ rollout_steps=%s does not match temp_agg.pos_emb length=%s; "
-                        "using pos_emb length for T.",
-                        self.T,
-                        pos_emb_T,
-                    )
-                    self.T = pos_emb_T
         logger.info(
             "🔍 Metadata: meta_dim=%s, include_shots=%s, vae_L=%s",
             self.meta_dim,
@@ -229,6 +215,40 @@ class PolicyEngine:
         if int_value <= 0:
             raise ValueError(f"Checkpoint field '{name}' must be > 0.")
         return int_value
+
+    def _resolve_rollout_steps(self, rollout_steps: Any, state_dict: Dict[str, torch.Tensor]) -> int:
+        """Resolve rollout length from checkpoint metadata and temporal embedding."""
+        resolved_T = self._coerce_positive_int(rollout_steps, "rollout_steps")
+        pos_emb = state_dict.get("temp_agg.pos_emb")
+        if pos_emb is None:
+            return resolved_T
+
+        if pos_emb.ndim < 2:
+            raise ValueError(
+                "Checkpoint temp_agg.pos_emb has invalid shape "
+                f"{tuple(pos_emb.shape)}; expected [*, T, *]. "
+                "Please supply a checkpoint with a valid positional embedding."
+            )
+
+        pos_emb_T = int(pos_emb.shape[1])
+        if pos_emb_T <= 0:
+            raise ValueError(
+                "Checkpoint temp_agg.pos_emb has non-positive temporal length "
+                f"{pos_emb_T}; expected a positive T."
+            )
+
+        if pos_emb_T != resolved_T:
+            logger.warning(
+                "⚠️ rollout_steps=%s does not match temp_agg.pos_emb length=%s. "
+                "Using the positional embedding length for T; please provide a "
+                "checkpoint with matching rollout_steps and pos_emb length if this "
+                "is unexpected.",
+                resolved_T,
+                pos_emb_T,
+            )
+            resolved_T = pos_emb_T
+
+        return resolved_T
     
     def _detect_simple_estimator(self, state_dict):
         """Detect if this is a simple estimator or full model."""

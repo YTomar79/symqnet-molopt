@@ -67,6 +67,7 @@ else:
         "measurement_simulator",
         "performance_estimator",
         "policy_engine", 
+        "smc_filter",
         "universal_wrapper",
         "utils",
     ]

@@ -242,11 +242,11 @@ class PolicyEngine:
                 "⚠️ rollout_steps=%s does not match temp_agg.pos_emb length=%s. "
                 "Using the positional embedding length for T; please provide a "
                 "checkpoint with matching rollout_steps and pos_emb length if this "
-                "is unexpected.",
+                "is unexpected. Letting pos_emb_T = resolved_T.",
                 resolved_T,
                 pos_emb_T,
             )
-            resolved_T = pos_emb_T
+            pos_emb_T = resolved_T
 
         return resolved_T
     

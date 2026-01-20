@@ -246,7 +246,7 @@ class PolicyEngine:
                 resolved_T,
                 pos_emb_T,
             )
-            pos_emb_T = resolved_T
+            resolved_T = pos_emb_T
 
         return resolved_T
     

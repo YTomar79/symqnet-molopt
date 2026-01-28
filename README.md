@@ -2,7 +2,7 @@
 
 SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for 1D and 2D molecular models and ultimately much more efficient molecular optimization.
 
-It is designed to use a Bayesian estimator, guided by a reinforcement-learning (RL) agent that acts as a scientist, to estimate Hamiltonians optimally for methods such as VQE-based molecular optimization and to deliver larger, downstream optimization gains. 
+It is designed to use a SMC Bayesian estimator, guided by a reinforcement-learning (RL) agent that acts as a scientist, to estimate Hamiltonians optimally for methods such as VQE-based molecular optimization and to deliver larger, downstream optimization gains. 
 
 ---
 

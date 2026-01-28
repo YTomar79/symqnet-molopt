@@ -1,7 +1,7 @@
 # SymQNet-MolOpt: Hamiltonian Parameter Estimation
 
 SymQNet-MolOpt provides efficient, uncertainty-aware estimation of Hamiltonian parameters for 1D and 2D molecular models and ultimately much more efficient molecular optimization.
-It is designed for sample-efficient optimization and reports confidence intervals for each parameter.
+It is designed to use a Bayseian estimator, guided by a reinforcement-learning (RL) agent that acts as a scientist, to estimate Hamiltonians optimally that can be used for methods such as VQE-based molecular optimization and bring bigger, downstream optimization gains. 
 
 ---
 
@@ -137,40 +137,59 @@ Results include estimated parameters with uncertainties plus experiment/config m
 
 ---
 
-## Metadata Slots (Policy Input)
 
-The policy network conditions on a metadata vector with fixed slots. The layout is defined in the
-architecture contract document: [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md).
+## Checkpoint Schema
 
-**Slot layout (see `MetadataLayout`):**
+A supported checkpoint is a dict-based bundle with these required fields:
+
+* `model_state_dict`: PyTorch state dict for the policy network.
+* `meta_dim`: Total metadata vector length.
+* `shots_encoding`: `null` or a dict with a `type` field indicating shot-conditioning.
+* `n_qubits`: Qubit count the model was trained on.
+* `M_evo`: Number of discrete evolution times.
+* `rollout_steps`: Temporal context length (T).
+
+Optional, but recommended, format guards:
+
+* `checkpoint_format`: must be `symqnet-ppo-v2`.
+* `checkpoint_version`: must be `1`.
+
+## Metadata Vector Layout
+
+The metadata vector follows `MetadataLayout.from_problem(n_qubits, M_evo)` and is ordered as:
 
 1. **Qubit selection (one-hot):** `n_qubits` slots.
 2. **Measurement basis (one-hot):** 3 slots for X/Y/Z.
 3. **Evolution time (one-hot):** `M_evo` slots.
-4. **Shot budget slot:** single slot used only when `shots_encoding` is enabled in the checkpoint.
+4. **Shots slot:** single slot used if `shots_encoding` is enabled.
 5. **Posterior mean (θ):** `2 * n_qubits - 1` slots.
 6. **Posterior covariance features:** `theta_dim + 8` slots.
 7. **Posterior Fisher diagonal:** `theta_dim` slots.
 
-Total metadata dimension is `n_qubits + 3 + M_evo + 1 + theta_dim + (theta_dim + 8) + theta_dim`.
+The total metadata dimension is `n_qubits + 3 + M_evo + 1 + theta_dim + (theta_dim + 8) + theta_dim`.
 
----
+## Shot Conditioning
 
-## Shot Handling
+When shot conditioning is enabled (`shots_encoding` is a dict), the CLI and policy engine
+normalize the user-provided shot budget into the shots slot using:
 
-* The CLI `--shots` value sets the measurement simulator budget and is used by the SMC filter.
-* If the checkpoint includes `shots_encoding` metadata, the shot budget is injected into the
-  metadata vector at the `shots_slot` index using the normalized value:
-  `log1p(shots) / log1p(1_000_000)`. If `shots_encoding` is missing/`null`, the slot is left at 0.
+```
+log1p(shots) / log1p(1_000_000)
+```
 
----
+If `shots_encoding` is `null`, the shots slot remains zero and the model ignores shot conditioning.
 
-## Migration Note (Older Checkpoints)
+## Outputs (High-Level)
 
-Legacy checkpoints that do not include the metadata bundle will be rejected. Please re-export or
-retrain to include the required keys: `model_state_dict`, `meta_dim`, `shots_encoding`, `n_qubits`,
-`M_evo`, `rollout_steps`, plus the optional `checkpoint_format`/`checkpoint_version` fields. The
-current format expects `checkpoint_format="symqnet-ppo-v2"` and `checkpoint_version=1`.
+The CLI emits a JSON bundle with:
+
+* `symqnet_results` (parameter estimates + uncertainty summaries)
+* `hamiltonian_info`
+* `experimental_config`
+* `metadata`
+* Optional `performance_analysis`, `universal_wrapper`, and `validation` blocks
+
+See `README.md` for a full output example.
 
 ---
 

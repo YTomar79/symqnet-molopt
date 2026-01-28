@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SymQNet Molecular Optimization CLI - CORRECTED UNIVERSAL VERSION
+SymQNet Molecular Optimization CLI (MAIN)
 
 Usage:
     symqnet-molopt --hamiltonian molecule.json --shots 1024 --output results.json
@@ -9,10 +9,6 @@ Output summary:
     • symqnet_results: coupling/field estimates, uncertainty stats, rollouts
     • hamiltonian_info / experimental_config / metadata
     • optional performance_analysis, universal_wrapper, validation blocks
-
-Metadata slots:
-    Uses the MetadataLayout contract (see ARCHITECTURE_CONTRACT.md) to encode
-    qubit/basis/time selections, shot budget (optional), and posterior features.
 
 Shot handling:
     The --shots value drives measurement sampling. If the checkpoint includes
